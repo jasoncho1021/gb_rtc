@@ -34782,7 +34782,7 @@ function initSound(){
     const options = {
       outputChannelCount: [2]
     };
-    soundWorklet = new AudioWorkletNode(ctx, 'sound-processor', options);
+    soundWorklet = new AudioWorkletNode(soundCtx, 'sound-processor', options);
 
     soundWorklet.port.postMessage({
       fillSab: soundFilledSab,
