@@ -2415,7 +2415,8 @@ Display.frameDuration = Display.cpuCyclesPerFrame / (4194304 / 4);//GameBoy.freq
                             // (456 * 154) / (4194304 / 1048576) / 1048576 = (456 * 154) / 4194304
 Display.frameInterval = Display.frameDuration * 1000; // 16.74 ms
 Display.palette = [
-    0xffe6f8da, 0xff99c886, 0xff437969, 0xff051f2a
+    0xffdeffef, 0xff94d7ad, 0x739252, 0xff423418
+    //0xffe6f8da, 0xff99c886, 0xff437969, 0xff051f2a
     //0xffffffff, 0xffaaaaaa, 0xff555555, 0xff000000,
 ];
 Display.colorPalette = Array.from(Array(0x8000), (v, k) => {

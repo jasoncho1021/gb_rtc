@@ -34915,6 +34915,8 @@ function keyHandler(ev) {
 }
 
 function startGame(rom) {
+  initSound();
+
   const uInt8Array = new Uint8Array(rom);
   const canvasWorker = document.getElementById(
       'canvas').transferControlToOffscreen();
