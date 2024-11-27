@@ -1,11 +1,3 @@
-/*
- * ATTENTION: The "eval" devtool has been used (maybe by default in mode: "development").
- * This devtool is neither made for production nor for readable output files.
- * It uses "eval()" calls to create a separate source file in the browser devtools.
- * If you are trying to read the output file, select a different devtool (https://webpack.js.org/configuration/devtool/)
- * or disable the default devtool with "devtool: false".
- * If you are looking for production-ready output files, see mode: "production" (https://webpack.js.org/configuration/mode/).
- */
 /******/ (() => { // webpackBootstrap
 /******/ 	"use strict";
 /******/ 	var __webpack_modules__ = ({
@@ -16,17 +8,20 @@
   \*******************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   customLog: () => (/* binding */ customLog)\n/* harmony export */ });\nfunction customLog(...args) {\n    // Join the arguments into a single string\n    //const message = args.join(' '); // You can customize the separator if needed\n    //logs.push(message); // Store the log message\n    //saveLine(message);\n    // Optionally, log to the console as well\n    //console.log(message); // This line can be removed if you don't want to log to the console\n    //console.log(...args);\n    //saveLine(message);\n}\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/dummylogger.js?");
-
-/***/ }),
-
-/***/ "./public/js/emulworker.js":
-/*!*********************************!*\
-  !*** ./public/js/emulworker.js ***!
-  \*********************************/
-/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
-
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony import */ var _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./gb/cpu.js */ \"./public/js/gb/cpu.js\");\n/* harmony import */ var _gb_display_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./gb/display.js */ \"./public/js/gb/display.js\");\n/* harmony import */ var _sync_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./sync.js */ \"./public/js/sync.js\");\n/* harmony import */ var _orderlock_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./orderlock.js */ \"./public/js/orderlock.js\");\n/*\nimportScripts('gb/cartridge.js',\n    'gb/cpu.js',\n    'gb/display.js',\n    'gb/joypad.js',\n    'gb/rtc.js',\n    'gb/serial.js',\n    'gb/sound.js',\n    'gb/timer.js',\n    'sync.js',\n    'orderlock.js',\n  '../dummylogger.js');\n*/\n\n\n // Adjust based on actual exports\n // Adjust based on actual exports\n\n\n//const { Mutex } = self; \n//const { OrderLock } = self;\n\nlet delayGap = 0;\nlet timestampLock = 0;\nlet mu;\nlet orderLock;\nconst maxSize = 1024 * 1024 * 1000;\n\nlet sharedArray;\nlet sharedBuffer;\n//let currentDataSize = 0; // Track the current size of data written\n\n// Initialize TextEncoder and TextDecoder once\nconst txtEncoder = new TextEncoder();\nconst txtDecoder = new TextDecoder();\n\nlet sharedCurrentSizeBuffer;\nlet sharedCurrentSize;\n\nfunction saveLog(...args) {\n  saveLogImpl(...args);\n}\n\nfunction saveLogImpl(...args) {\n  const enterId = orderLock.lock();\n  //console.log(\"emul [GET LOCK]\");\n  const line = \"[\" + enterId + \"] \" + args.join(' ');\n  \n  let currentSize = Atomics.load(sharedCurrentSize, 0);\n  const encodedLine = txtEncoder.encode(line + '\\n'); // Add newline for separation\n  const lineSize = encodedLine.length;\n\n  // Check if there is enough space in the buffer\n  if (currentSize + lineSize > maxSize) {\n      console.log('Buffer is full. Cannot add more data.');\n      orderLock.unLock();\n      return false; // Indicate that the buffer is full\n  }\n\n  // Store the encoded line in the buffer atomically\n  for (let i = 0; i < lineSize; i++) {\n      Atomics.store(sharedArray, currentSize + i, encodedLine[i]);\n  }\n\n  // Update the current size atomically\n  Atomics.add(new Int32Array(sharedBuffer), 0, lineSize); // Assuming the first 4 bytes of the buffer are used for currentSize\n  //currentSize += lineSize; // Update the current size\n  Atomics.add(sharedCurrentSize, 0, lineSize);\n\n  orderLock.unLock();\n  //console.log(\"emul [RELEASE LOCK]\");\n  return true; // Indicate success\n}\n\nself.onmessage = event => {\n  const {msg, payload} = event.data;\n  switch (msg) {\n    case 'init':\n      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas = payload.canvas;\n      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;\n      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;\n      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.getContext('2d');\n      timestampLock = new Int32Array(payload.networkTimingBuffer);\n  \n      mu = _sync_js__WEBPACK_IMPORTED_MODULE_2__.Mutex.connect(payload.smu);\n\n      sharedBuffer = payload.buffer;\n      sharedArray = new Uint8Array(sharedBuffer);\n\n      sharedCurrentSizeBuffer = payload.currentSizeBuffer;\n      sharedCurrentSize = new Int32Array(sharedCurrentSizeBuffer);\n\n      orderLock = _orderlock_js__WEBPACK_IMPORTED_MODULE_3__.OrderLock.connect(payload.orderLock);\n\n      loadAndStart(payload);\n      break;\n    case 'restart':\n      const current = performance.now();\n      const travelTime = current-past;\n      const leftDelayTime = delayGap - travelTime;\n\n      saveLog(\"delayGap     : \", delayGap.toFixed(3));\n      saveLog(\"travelTime   : \", travelTime.toFixed(3));\n      saveLog(\"leftDelayTime: \", leftDelayTime.toFixed(3));\n\n      /*\n      if(payload.isNextRecvQ) {\n        saveLog(\"****0       : nextRecvQ is true\");\n        preStart();\n        saveLog(\"****0       break\");\n        return;\n      }\n      */\n\n      if(delayGap <= 0) { // repay armotized delay by skipping the wait time\n        saveLog(\"**** 1      : Gap1 is exceed 16.74\");\n        preStart();\n        saveLog(\"**** 1      break\");\n        return;\n      }      \n      \n      if(leftDelayTime <= 0) { // repay armotized delay by skipping the wait time\n        saveLog(\"****  2     : travel Time used all delayGap\");\n        preStart();\n        saveLog(\"****  2     break\");\n        return;\n      }\n\n      if(leftDelayTime > 4) {\n        saveLog(\"****   3    : more than 4ms call SetTimeout \");\n        setTimeout(() =>  preStart(), leftDelayTime);\n        saveLog(\"****   3    break\");\n        return;\n      } \n\n      saveLog(\"****    4   : left delay is less than and equal four. \" + leftDelayTime.toFixed(3));\n      preStart();\n      saveLog(\"****    4   break\");\n\n      return;\n    case 'start':\n      noDelayUpdate();\n      return;\n    default:\n      //saveLog(event);\n      console.log(event);\n  }\n};\n\nlet gb;\nlet cycles;\nlet next;\nlet paused = false;\nlet running = false;\n\nlet past;\n\nlet oldUpdateGap = 0;\nlet fps = 0;\nlet isInitUpdate = true;\n\nlet pastGap = 0;\n\nlet timestamp = 0;\nlet mainLock;\nlet tsIdx = 0;\n\nfunction preStart() {\n  self.postMessage({\n    msg: 'T',\n    payload: -1,\n    time: -1\n  });\n}\n\nlet cpuCycles = 0;\nconst PERIOD = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame/3;\n\nfunction noDelayUpdate() {\n  const startTime = performance.now();\n  _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime = startTime;\n  const gap0 = startTime - past;\n  //saveLog(\"start time: \", startTime.toFixed(3));\n  saveLog(\"%c [GAP0] {  e}__{s      }   = \" + gap0.toFixed(3), \"background:red; color:white\")\n\n if (paused || !running) {\n        return;\n    }\n    if (gb.cartridge.hasRTC) {\n        gb.cartridge.rtc.updateTime();\n    }\n    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {\n        try {\n            cpuCycles = gb.cycle();\n            cycles += cpuCycles;\n            \n            \n            timestamp += cpuCycles;\n            if(timestamp >= PERIOD) {\n              timestamp = timestamp - PERIOD;\n\n              tsIdx = (tsIdx + 1) % 10;\n\n              \n              mu.lock();\n\n              self.postMessage({\n                msg: 'ts',\n                payload: tsIdx,\n                time: -1\n              });\n              saveLog(\"ts request \" + tsIdx);\n              Atomics.store(timestampLock, 0, 1);\n              saveLog(\"ts blocked \" + tsIdx);\n              Atomics.wait(timestampLock, 0, 1);\n              saveLog(\"ts unblocked \" + tsIdx);\n              \n            }\n            \n        } catch (error) {\n            console.error(error);\n            running = false;\n            return;\n        }\n    }\n    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;\n    saveLog(\"over cycles: \", cycles);\n\n    fps++;\n\n\n    const current = performance.now();\n    past = current;\n    const gap1 = current-startTime;\n    saveLog(\"%c [GAP1]        {s_____e}   = \" + gap1.toFixed(3), \"background:orange; color:black\");\n\n\n    if(fps > 59) {\n      saveLog(fps + \" fps over 59, reset old delay 0\")\n      isInitUpdate = true; // reset delay\n    }\n    \n    if(isInitUpdate) {\n      isInitUpdate = false;\n      next = current;\n      delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;\n    } else {\n\n      // amortized\n      next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37\n      delayGap = next - current;\n      \n      // not amortized\n      /*\n      if((delayGap > 0) && (gap0 > delayGap)) {\n        delayGap = Display.frameInterval - (gap0 - delayGap) - gap1;\n      } else {\n        delayGap = Display.frameInterval - gap1;\n      }\n      */\n    }\n\n    self.postMessage({ // recvQ\n      msg: 'M',\n      payload: -1,\n      time: -1\n    });\n}\n\n\nfunction oldUpdate() {\n  const startTime = performance.now();\n    const gap0 = startTime - past;\n    saveLog(\"%c [GAPx]    e}_ {s     e}   = \" + pastGap.toFixed(3), \"background:blue; color:white\");\n    saveLog(\"%c [GAP0] {  e}__{s      }   = \" + gap0.toFixed(3), \"background:red; color:white\");\n    if(pastGap > 0) {\n        saveLog(\"%c [GAPr]    e} _{s     e}   = \" + (gap0-pastGap).toFixed(3), \"background:green; color:white\");\n    } else {\n        saveLog(\"%c [GAPr]    e} _{s     e}   = \" + (gap0).toFixed(3), \"background:green; color:white\");\n    }\n\n    if (paused || !running) {\n        return;\n    }\n    if (gb.cartridge.hasRTC) {\n        gb.cartridge.rtc.updateTime();\n    }\n    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {\n        try {\n            cycles += gb.cycle();\n        } catch (error) {\n            console.error(error);\n            running = false;\n            return;\n        }\n    }\n    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;\n\n    fps++;\n\n    const current = performance.now();\n    const gap1 = current-startTime;\n    let nextGap;\n\n    \n    if(isInitUpdate) {\n      isInitUpdate = false;\n      next = current;\n      nextGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval-gap1;\n    } else {\n      next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37\n      nextGap = next - current;\n    }\n    \n\n    // origin\n    //next += Display.frameInterval; //next += 16.74 or 8.37\n    //nextGap = next - current;\n    //\n\n\n    saveLog(\"%c [GAP1]        {s_____e}   = \" + gap1.toFixed(3), \"background:orange; color:black\");\n    saveLog(\"%c [GAP4]        {s     e}___= \" + nextGap.toFixed(3), \"color:blue\");\n\n    past = current;\n\n    pastGap = nextGap;\n    \n    setTimeout(oldUpdate, nextGap);\n}\n\nlet lastTime;\nfunction paint(callTime) {\n  saveLog(\"%c [GAP$] {s__}___{e  }   = \" + (callTime - lastTime).toFixed(3), \"background:green; color:white\");\n  lastTime = callTime;\n\n  /*\n  const startTime = performance.now();\n  const gap0 = startTime - past;\n  saveLog(\"%c [GAP0] s}____{e    }   = \" + gap0.toFixed(3), \"background:red; color:white\");\n  */\n  \n\n  if (paused || !running) {\n    return;\n  }\n  if (gb.cartridge.hasRTC) {\n    saveLog(\"%c RTC \" , \"background:black; color:white\");\n    gb.cartridge.rtc.updateTime();\n  }\n\n  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {\n    try {\n      cycles += gb.cycle();\n    } catch (error) {\n      console.error(error);\n      running = false;\n      return;\n    }\n  }\n  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;\n\n  fps++;\n\n  /*\n  const current = performance.now();\n  const gap1 = current - startTime;\n  past = current;\n  saveLog(\"%c [GAP1]       {s___e}   = \" + gap1.toFixed(3), \"background:orange; color:black\");\n  */\n  \n\n  requestAnimationFrame(paint);\n}\n\n\nfunction update() {\n  const startTime = performance.now();\n  const gap0 = startTime - past;\n  saveLog(\"%c [GAP0] s}____{e    }   = \" + gap0.toFixed(3), \"background:red; color:white\");\n\n  if (paused || !running) {\n    return;\n  }\n  if (gb.cartridge.hasRTC) {\n    gb.cartridge.rtc.updateTime();\n  }\n\n  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {\n    try {\n      cycles += gb.cycle();\n    } catch (error) {\n      console.error(error);\n      running = false;\n      return;\n    }\n  }\n  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;\n\n  fps++;\n\n\n\n\n\n\n  /**\n         'loadAndStart'   'setTimeout'\n      next  : now,         now+16.74,         // ideal lap time\n      before: now,   now+x            now+y,\n\n\n     =========|=========|\n      (     )   (    )\n            <--       <--\n\n      updateGap = next - current\n     \n   */\n  /*\n  const current = performance.now();\n  const gap1 = current-startTime;\n  let updateGap;\n  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정\n    isInitUpdate = false;\n    next = current;\n    updateGap = Display.frameInterval-gap1;\n  } else {\n    next += Display.frameInterval; // +16.74ms\n    updateGap = next - current;\n  }\n  past = current;\n\n  saveLog(\"%c [GAP1]       {s___e}   = \" + gap1.toFixed(3), \"background:orange; color:black\");\n  saveLog(\"%c [GAPu] s}    {    e}<--= \" + updateGap.toFixed(3), \"background:green; color:white\");\n  \n  setTimeout(() => update(), updateGap);\n*/\n\n\n\n  /*\n   const current = performance.now();\n   const setTimeoutGap = current-past;\n   past = current;\n   const updateGap = Display.frameInterval - setTimeoutGap;\n\n   saveLog(\"%c [GAP1]        {s-----e}   = \" + (current-startTime).toFixed(3), \"background:orange; color:black\");\n   saveLog(\"%c [GAP2] {  s}--{------e}   = \"+ setTimeoutGap.toFixed(3), \"background:yellow; color:black\");\n   saveLog(\"%c [GAP3} {  s--16.74---e}   = \"+ updateGap.toFixed(3), \"background:green; color:white\");\n   */\n\n\n\n/**\n *   (       )                (      )\n * \n *           _________.........______xxxxx\n * \n *           <------->                       oldUpdateGap     \n *           <----------------->             gap0\n *                             <----->       gap1\n *           <----------------------->       gap2\n *                                   <--->   updateGap\n *                    <------->              realDelay\n */\n\n  /**\n   * \n   *                          if oldUpdateGap <= gap0\n   *                               (    )    (     )\n   *                                   <-->....\n   *                                   <------>\n   *                                updateGap = 16.74 - (gap0 - oldUpdateGap) - gap1;\n   *                          else\n   *                               (    )    (     )\n   *                                   <-------->\n   *                                   <------>\n   *                                updateGap = 16.74 -         0             - gap1;\n   * \n   * \n   *    if oldUpdateGap <= 0 (already over 16.74), then take 4ms gap0 as default delay of mine.\n   * \n   */\n  \n  const current = performance.now();\n  const gap1 = current - startTime;\n  const gap2 = current - past;\n  const realDelay = oldUpdateGap > gap0 ? 0 : gap0 - oldUpdateGap;\n  \n  let updateGap;\n  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정\n    isInitUpdate = false;\n    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;\n  } else {\n    //updateGap = Display.frameInterval - gap2 + oldUpdateGap;  //Display.frameInterval - (gap0 - oldUpdateGap) - gap1;\n    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - realDelay - gap1;\n  }\n\n  saveLog(\"%c [GAP1]       {s___e}   = \" + gap1.toFixed(3), \"background:orange; color:black\");\n  //saveLog(\"%c [GAP2] s}____{____e}   = \" + gap2.toFixed(3), \"background:yellow; color:black\");\n  saveLog(\"%c [GAP2] s}  __{    e}   = \" + realDelay.toFixed(3), \"background:yellow; color:black\");\n  saveLog(\"%c [GAP3] s}__  {    e}   = \" + oldUpdateGap.toFixed(3), \"background:green; color:white\");\n  saveLog(\"%c [GAP4] s}    {s   e}__ = \" + updateGap.toFixed(3), \"background:blue; color:white\");\n\n  if(updateGap < 0) {\n    updateGap = 0;\n  }\n  oldUpdateGap = updateGap;\n  past = current;\n\n\n  setTimeout(() => update(), updateGap);\n  \n\n\n  /** \n      setInterval\n  */\n  /*\n  const current = performance.now();\n  const gap1 = current - startTime;\n  past = current;\n  saveLog(\"%c [GAP1]       {s___e}   = \" + gap1.toFixed(3), \"background:orange; color:black\");\n  */\n  \n  \n}\n\nlet printOld;\n\nfunction printFps() {\n  const current = performance.now();\n\n /*\n  save the int value to setIntGap\n */\n  const setIntGap = (current - printOld).toFixed(0);\n  const letter = fps + \" \" + _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps + \" \" + setIntGap;\n  let isSame = true;\n  if(fps !== _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps) {\n    isSame = false; \n  } \n  self.postMessage({msg: 'F', payload: letter, time:isSame});\n\n  saveLog(\"%c FPS= \" + letter, \"background:cyan; color:black\");\n  saveLog(\"%c 1 sec= \" + setIntGap,\n      \"background:cyan; color:red\");\n  _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps = 0;\n  fps = 0;\n  printOld = current;\n}\n\nfunction loadAndStart(payload) {\n  let rom = payload.uInt8Array;\n  gb = new _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy(payload.flagSharedBuffer,\n      payload.sbSharedBuffer,\n      payload.scSharedBuffer,\n      payload.transferTriggerSharedBuffer,\n      payload.useInternalClockSharedBuffer,\n      payload.sharedBuffer,\n      payload.timingBuffer,\n      payload.waitScBuffer,\n      payload.keySharedBuffer,\n      payload.scDirtySharedBuffer,\n      payload.scMonitorStartSharedBuffer,\n      payload.soundLeftSab,\n      payload.soundRightSab);\n  gb.setMessenger(self);\n  try {\n    gb.cartridge.load(rom);\n    running = true;\n    past = performance.now();\n    cycles = 0;\n    saveLog(\"load\");\n\n    next = past;\n\n    //update();\n    //oldUpdate();\n\n    noDelayUpdate();\n\n    //setInterval(() => update(), Display.frameInterval);\n\n    //requestAnimationFrame(paint);\n\n    printOld = past;\n    setInterval(() => printFps(), 1000);\n  } catch (error) {\n    console.error(error);\n  }\n}\n\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/js/emulworker.js?");
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   customLog: () => (/* binding */ customLog)
+/* harmony export */ });
+function customLog(...args) {
+    // Join the arguments into a single string
+    //const message = args.join(' '); // You can customize the separator if needed
+    //logs.push(message); // Store the log message
+    //saveLine(message);
+    // Optionally, log to the console as well
+    //console.log(message); // This line can be removed if you don't want to log to the console
+    //console.log(...args);
+    //saveLine(message);
+}
 
 /***/ }),
 
@@ -36,7 +31,462 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony import */ var _gb_
   \***********************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   Cartridge: () => (/* binding */ Cartridge)\n/* harmony export */ });\nclass Cartridge {\n    constructor(gb) {\n        this.gb = gb;\n    }\n\n    readROM(address) {\n        switch (this.cartridgeType) {\n            case 0x00:\n            case 0x08:\n            case 0x09:\n                return this.rom[address];\n            case 0x01:\n            case 0x02:\n            case 0x03:\n            case 0x05:\n            case 0x06:\n            case 0x11:\n            case 0x12:\n            case 0x13:\n            case 0x0f:\n            case 0x10:\n            case 0x19:\n            case 0x1a:\n            case 0x1b:\n            case 0x1c:\n            case 0x1d:\n            case 0x1e:\n            case 0xff:\n                switch (address >> 14) {\n                    case 0:\n                        return this.rom[address & 0x3fff];\n                    case 1:\n                        return this.rom[(this.romBankNumber << 14) | (address & 0x3fff)];\n                }\n        }\n    }\n\n    writeROM(address, value) {\n        switch (this.cartridgeType) {\n            case 0x00:\n            case 0x08:\n            case 0x09:\n                break;\n            case 0x01:\n            case 0x02:\n            case 0x03:\n                switch (address >> 13) {\n                    case 0:\n                        if (this.hasRAM) {\n                            this.ramEnable = (value & 0xf) == 0xa;\n                        }\n                        break;\n                    case 1:\n                        this.romBankNumber &= 0x60;\n                        if ((value & 0x1f) == 0) {\n                            value |= 0x1;\n                        }\n                        this.romBankNumber |= value & 0x1f;\n                        this.romBankNumber %= (this.rom.length / 0x4000);\n                        break;\n                    case 2:\n                        if (this.ramBankMode) {\n                            if (this.hasRAM) {\n                                this.ramBankNumber = value & 0x3;\n                                this.ramBankNumber %= (this.ram.length / 0x2000);\n                            }\n                            this.romBankNumber &= 0x1f;\n                        } else {\n                            this.romBankNumber &= 0x1f;\n                            this.romBankNumber |= (value & 0x3) << 5;\n                            this.romBankNumber %= (this.rom.length / 0x4000);\n                            if (this.hasRAM) {\n                                this.ramBankNumber = 0;\n                            }\n                        }\n                        break;\n                    case 3:\n                        this.ramBankMode = (value & 0x1) != 0;\n                        break;\n                }\n                break;\n            case 0x05:\n            case 0x06:\n                switch ((address >> 8) & 0x41) {\n                    case 0:\n                        this.ramEnable = (value & 0xf) == 0xa;\n                        break;\n                    case 1:\n                        if ((value & 0xf) == 0) {\n                            value |= 0x1;\n                        }\n                        this.romBankNumber = value & 0xf;\n                        this.romBankNumber %= (this.rom.length / 0x4000);\n                        break;\n                }\n                break;\n            case 0x11:\n            case 0x12:\n            case 0x13:\n            case 0x0f:\n            case 0x10:\n                switch (address >> 13) {\n                    case 0:\n                        if (this.hasRAM) {\n                            this.ramEnable = (value & 0xf) == 0xa;\n                        }\n                        break;\n                    case 1:\n                        if ((value & 0x7f) == 0) {\n                            value |= 0x1;\n                        }\n                        this.romBankNumber = value & 0x7f;\n                        this.romBankNumber %= (this.rom.length / 0x4000);\n                        break;\n                    case 2:\n                        switch (value) {\n                            case 0x00:\n                            case 0x01:\n                            case 0x02:\n                            case 0x03:\n                                if (this.hasRAM) {\n                                    this.ramBankNumber = value;\n                                    this.ramBankNumber %= (this.ram.length / 0x2000);\n                                }\n                                break;\n                            case 0x08:\n                            case 0x09:\n                            case 0x0a:\n                            case 0x0b:\n                            case 0x0c:\n                                if (this.hasRTC) {\n                                    this.ramBankNumber = value;\n                                }\n                                break;\n                        }\n                        break;\n                    case 3:\n                        if (this.hasRTC) {\n                            this.rtc.latch = value;\n                        }\n                        break;\n                }\n                break;\n            case 0x19:\n            case 0x1a:\n            case 0x1b:\n            case 0x1c:\n            case 0x1d:\n            case 0x1e:\n                switch (address >> 12) {\n                    case 0:\n                    case 1:\n                        if (this.hasRAM) {\n                            this.ramEnable = (value & 0xf) == 0xa;\n                        }\n                        break;\n                    case 2:\n                        this.romBankNumber &= 0x100;\n                        this.romBankNumber |= value;\n                        this.romBankNumber %= (this.rom.length / 0x4000);\n                        break;\n                    case 3:\n                        this.romBankNumber &= 0xff;\n                        this.romBankNumber |= (value & 0x1) << 8;\n                        this.romBankNumber %= (this.rom.length / 0x4000);\n                        break;\n                    case 4:\n                    case 5:\n                        if (this.hasRAM) {\n                            this.ramBankNumber = value & 0xf;\n                            this.ramBankNumber %= (this.ram.length / 0x2000);\n                        }\n                        break;\n                }\n                break;\n            case 0xff:\n                switch (address >> 13) {\n                    case 0:\n                        this.irSelect = value == 0xe;\n                        break;\n                    case 1:\n                        this.romBankNumber = value & 0x3f;\n                        this.romBankNumber %= (this.rom.length / 0x4000);\n                        break;\n                    case 2:\n                        this.ramBankNumber = value & 0x3;\n                        this.ramBankNumber %= (this.ram.length / 0x2000);\n                        break;\n                }\n                break;\n        }\n    }\n\n    readRAM(address) {\n        if (this.ramEnable) {\n            switch (this.cartridgeType) {\n                case 0x00:\n                    break;\n                case 0x08:\n                case 0x09:\n                    return this.ram[address];\n                case 0x01:\n                    break;\n                case 0x02:\n                case 0x03:\n                    return this.ram[(this.ramBankNumber << 13) | address];\n                case 0x05:\n                case 0x06:\n                    return 0xf0 | this.ram[address & 0x1ff];\n                case 0x11:\n                    break;\n                case 0x12:\n                case 0x13:\n                case 0x0f:\n                case 0x10:\n                    switch (this.ramBankNumber) {\n                        case 0x00:\n                        case 0x01:\n                        case 0x02:\n                        case 0x03:\n                            return this.ram[(this.ramBankNumber << 13) | address];\n                        case 0x08:\n                            return this.rtc.s;\n                        case 0x09:\n                            return this.rtc.m;\n                        case 0x0a:\n                            return this.rtc.h;\n                        case 0x0b:\n                            return this.rtc.dl;\n                        case 0x0c:\n                            return this.rtc.dh;\n                    }\n                    break;\n                case 0x19:\n                case 0x1a:\n                case 0x1b:\n                case 0x1c:\n                case 0x1d:\n                case 0x1e:\n                    return this.ram[(this.ramBankNumber << 13) | address];\n                case 0xff:\n                    if (this.irSelect) {\n                        return this.irOn ? 0xc0 : 0xff;\n                    } else {\n                        return this.ram[(this.ramBankNumber << 13) | address];\n                    }\n            }\n        }\n        return 0xff;\n    }\n\n    writeRAM(address, value) {\n        if (this.ramEnable) {\n            switch (this.cartridgeType) {\n                case 0x00:\n                    break;\n                case 0x08:\n                case 0x09:\n                    this.ram[address] = value;\n                    break;\n                case 0x01:\n                    break;\n                case 0x02:\n                case 0x03:\n                    this.ram[(this.ramBankNumber << 13) | address] = value;\n                    break;\n                case 0x05:\n                case 0x06:\n                    this.ram[address & 0x1ff] = value & 0xf;\n                    break;\n                case 0x11:\n                    break;\n                case 0x12:\n                case 0x13:\n                case 0x0f:\n                case 0x10:\n                    switch (this.ramBankNumber) {\n                        case 0x00:\n                        case 0x01:\n                        case 0x02:\n                        case 0x03:\n                            this.ram[(this.ramBankNumber << 13) | address] = value;\n                            break;\n                        case 0x08:\n                            this.rtc.s = value;\n                            break;\n                        case 0x09:\n                            this.rtc.m = value;\n                            break;\n                        case 0x0a:\n                            this.rtc.h = value;\n                            break;\n                        case 0x0b:\n                            this.rtc.dl = value;\n                            break;\n                        case 0x0c:\n                            this.rtc.dh = value;\n                            break;\n                    }\n                    break;\n                case 0x19:\n                case 0x1a:\n                case 0x1b:\n                case 0x1c:\n                case 0x1d:\n                case 0x1e:\n                    this.ram[(this.ramBankNumber << 13) | address] = value;\n                    break;\n                case 0xff:\n                    if (this.irSelect) {\n                        this.irOn = (value & 0x1) != 0;\n                    } else {\n                        this.ram[(this.ramBankNumber << 13) | address] = value;\n                    }\n                    break;\n            }\n        }\n    }\n\n    load(file) {\n        this.title = new TextDecoder('ascii').decode(file.slice(0x134, 0x144));\n\n        const cgb = file[0x143];\n        this.gb.cgb = (cgb & 0x80) != 0;\n        this.gb.a = cgb ? 0x11 : 0x01;\n\n        this.cartridgeType = file[0x147];\n        switch (this.cartridgeType) {\n            case 0x09:\n                this.hasBattery = true;\n            case 0x08:\n                this.ramEnable = true;\n                this.hasRAM = true;\n            case 0x00:\n                this.rom = file;\n                break;\n            case 0x03:\n                this.hasBattery = true;\n            case 0x02:\n                this.ramEnable = false;\n                this.ramBankMode = false;\n                this.hasRAM = true;\n            case 0x01:\n                this.rom = file;\n                this.romBankNumber = 1;\n                break;\n            case 0x06:\n                this.hasBattery = true;\n            case 0x05:\n                this.rom = file;\n                this.romBankNumber = 1;\n                this.ram = new Uint8Array(0x200);\n                this.ramEnable = false;\n                this.hasRAM = true;\n                break;\n            case 0x10:\n                this.hasRAM = true;\n            case 0x0f:\n                this.rom = file;\n                this.romBankNumber = 1;\n                this.ramEnable = false;\n                this.hasBattery = true;\n                this.hasRTC = true;\n                break;\n            case 0x13:\n                this.hasBattery = true;\n            case 0x12:\n                this.ramEnable = false;\n                this.hasRAM = true;\n            case 0x11:\n                this.rom = file;\n                this.romBankNumber = 1;\n                break;\n            case 0x1e:\n            case 0x1b:\n                this.hasBattery = true;\n            case 0x1d:\n            case 0x1a:\n                this.ramEnable = false;\n                this.hasRAM = true;\n            case 0x1c:\n            case 0x19:\n                this.rom = file;\n                this.romBankNumber = 1;\n                break;\n            case 0xff:\n                this.rom = file;\n                this.romBankNumber = 1;\n                this.ramEnable = true;\n                this.hasRAM = true;\n                this.hasBattery = true;\n                break;\n            default:\n                throw 'unknown cartridge type: 0x' + this.cartridgeType.toString(16);\n        }\n\n        const romSize = 32768 << file[0x148];\n        if (file.length != romSize) {\n            throw 'wrong file size';\n        }\n\n        const ramSize = file[0x149];\n        if (this.hasRAM) {\n            /**\n             * this cartridge type\n             * does not directly access localStorage from webworker\n             */\n            /*\n            if (this.hasBattery && this.title in localStorage) {\n                this.ram = new Uint8Array(localStorage[this.title].split(',').map(parseFloat));\n            } else {\n             */\n                switch (ramSize) {\n                    case 0x00:\n                        break;\n                    case 0x02:\n                        this.ram = new Uint8Array(0x2000);\n                        break;\n                    case 0x03:\n                        this.ram = new Uint8Array(0x8000);\n                        break;\n                    case 0x04:\n                        this.ram = new Uint8Array(0x20000);\n                        break;\n                    case 0x05:\n                        this.ram = new Uint8Array(0x10000);\n                        break;\n                    default:\n                        throw 'unknown RAM size: 0x' + ramSize.toString(16);\n                }\n            //}\n        }\n        if (this.hasRTC) {\n            if (this.hasBattery && (this.title + 'TIME') in localStorage) {\n                this.rtc = new RTC();\n                Object.assign(this.rtc, JSON.parse(localStorage[this.title + 'TIME']));\n            } else {\n                this.rtc = new RTC();\n            }\n        }\n    }\n\n    save() {\n        if (this.hasRAM && this.hasBattery) {\n            localStorage[this.title] = this.ram;\n        }\n        if (this.hasRTC && this.hasBattery) {\n            localStorage[this.title + 'TIME'] = JSON.stringify(this.rtc);\n        }\n    }\n}\n\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/js/gb/cartridge.js?");
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Cartridge: () => (/* binding */ Cartridge)
+/* harmony export */ });
+class Cartridge {
+    constructor(gb) {
+        this.gb = gb;
+    }
+
+    readROM(address) {
+        switch (this.cartridgeType) {
+            case 0x00:
+            case 0x08:
+            case 0x09:
+                return this.rom[address];
+            case 0x01:
+            case 0x02:
+            case 0x03:
+            case 0x05:
+            case 0x06:
+            case 0x11:
+            case 0x12:
+            case 0x13:
+            case 0x0f:
+            case 0x10:
+            case 0x19:
+            case 0x1a:
+            case 0x1b:
+            case 0x1c:
+            case 0x1d:
+            case 0x1e:
+            case 0xff:
+                switch (address >> 14) {
+                    case 0:
+                        return this.rom[address & 0x3fff];
+                    case 1:
+                        return this.rom[(this.romBankNumber << 14) | (address & 0x3fff)];
+                }
+        }
+    }
+
+    writeROM(address, value) {
+        switch (this.cartridgeType) {
+            case 0x00:
+            case 0x08:
+            case 0x09:
+                break;
+            case 0x01:
+            case 0x02:
+            case 0x03:
+                switch (address >> 13) {
+                    case 0:
+                        if (this.hasRAM) {
+                            this.ramEnable = (value & 0xf) == 0xa;
+                        }
+                        break;
+                    case 1:
+                        this.romBankNumber &= 0x60;
+                        if ((value & 0x1f) == 0) {
+                            value |= 0x1;
+                        }
+                        this.romBankNumber |= value & 0x1f;
+                        this.romBankNumber %= (this.rom.length / 0x4000);
+                        break;
+                    case 2:
+                        if (this.ramBankMode) {
+                            if (this.hasRAM) {
+                                this.ramBankNumber = value & 0x3;
+                                this.ramBankNumber %= (this.ram.length / 0x2000);
+                            }
+                            this.romBankNumber &= 0x1f;
+                        } else {
+                            this.romBankNumber &= 0x1f;
+                            this.romBankNumber |= (value & 0x3) << 5;
+                            this.romBankNumber %= (this.rom.length / 0x4000);
+                            if (this.hasRAM) {
+                                this.ramBankNumber = 0;
+                            }
+                        }
+                        break;
+                    case 3:
+                        this.ramBankMode = (value & 0x1) != 0;
+                        break;
+                }
+                break;
+            case 0x05:
+            case 0x06:
+                switch ((address >> 8) & 0x41) {
+                    case 0:
+                        this.ramEnable = (value & 0xf) == 0xa;
+                        break;
+                    case 1:
+                        if ((value & 0xf) == 0) {
+                            value |= 0x1;
+                        }
+                        this.romBankNumber = value & 0xf;
+                        this.romBankNumber %= (this.rom.length / 0x4000);
+                        break;
+                }
+                break;
+            case 0x11:
+            case 0x12:
+            case 0x13:
+            case 0x0f:
+            case 0x10:
+                switch (address >> 13) {
+                    case 0:
+                        if (this.hasRAM) {
+                            this.ramEnable = (value & 0xf) == 0xa;
+                        }
+                        break;
+                    case 1:
+                        if ((value & 0x7f) == 0) {
+                            value |= 0x1;
+                        }
+                        this.romBankNumber = value & 0x7f;
+                        this.romBankNumber %= (this.rom.length / 0x4000);
+                        break;
+                    case 2:
+                        switch (value) {
+                            case 0x00:
+                            case 0x01:
+                            case 0x02:
+                            case 0x03:
+                                if (this.hasRAM) {
+                                    this.ramBankNumber = value;
+                                    this.ramBankNumber %= (this.ram.length / 0x2000);
+                                }
+                                break;
+                            case 0x08:
+                            case 0x09:
+                            case 0x0a:
+                            case 0x0b:
+                            case 0x0c:
+                                if (this.hasRTC) {
+                                    this.ramBankNumber = value;
+                                }
+                                break;
+                        }
+                        break;
+                    case 3:
+                        if (this.hasRTC) {
+                            this.rtc.latch = value;
+                        }
+                        break;
+                }
+                break;
+            case 0x19:
+            case 0x1a:
+            case 0x1b:
+            case 0x1c:
+            case 0x1d:
+            case 0x1e:
+                switch (address >> 12) {
+                    case 0:
+                    case 1:
+                        if (this.hasRAM) {
+                            this.ramEnable = (value & 0xf) == 0xa;
+                        }
+                        break;
+                    case 2:
+                        this.romBankNumber &= 0x100;
+                        this.romBankNumber |= value;
+                        this.romBankNumber %= (this.rom.length / 0x4000);
+                        break;
+                    case 3:
+                        this.romBankNumber &= 0xff;
+                        this.romBankNumber |= (value & 0x1) << 8;
+                        this.romBankNumber %= (this.rom.length / 0x4000);
+                        break;
+                    case 4:
+                    case 5:
+                        if (this.hasRAM) {
+                            this.ramBankNumber = value & 0xf;
+                            this.ramBankNumber %= (this.ram.length / 0x2000);
+                        }
+                        break;
+                }
+                break;
+            case 0xff:
+                switch (address >> 13) {
+                    case 0:
+                        this.irSelect = value == 0xe;
+                        break;
+                    case 1:
+                        this.romBankNumber = value & 0x3f;
+                        this.romBankNumber %= (this.rom.length / 0x4000);
+                        break;
+                    case 2:
+                        this.ramBankNumber = value & 0x3;
+                        this.ramBankNumber %= (this.ram.length / 0x2000);
+                        break;
+                }
+                break;
+        }
+    }
+
+    readRAM(address) {
+        if (this.ramEnable) {
+            switch (this.cartridgeType) {
+                case 0x00:
+                    break;
+                case 0x08:
+                case 0x09:
+                    return this.ram[address];
+                case 0x01:
+                    break;
+                case 0x02:
+                case 0x03:
+                    return this.ram[(this.ramBankNumber << 13) | address];
+                case 0x05:
+                case 0x06:
+                    return 0xf0 | this.ram[address & 0x1ff];
+                case 0x11:
+                    break;
+                case 0x12:
+                case 0x13:
+                case 0x0f:
+                case 0x10:
+                    switch (this.ramBankNumber) {
+                        case 0x00:
+                        case 0x01:
+                        case 0x02:
+                        case 0x03:
+                            return this.ram[(this.ramBankNumber << 13) | address];
+                        case 0x08:
+                            return this.rtc.s;
+                        case 0x09:
+                            return this.rtc.m;
+                        case 0x0a:
+                            return this.rtc.h;
+                        case 0x0b:
+                            return this.rtc.dl;
+                        case 0x0c:
+                            return this.rtc.dh;
+                    }
+                    break;
+                case 0x19:
+                case 0x1a:
+                case 0x1b:
+                case 0x1c:
+                case 0x1d:
+                case 0x1e:
+                    return this.ram[(this.ramBankNumber << 13) | address];
+                case 0xff:
+                    if (this.irSelect) {
+                        return this.irOn ? 0xc0 : 0xff;
+                    } else {
+                        return this.ram[(this.ramBankNumber << 13) | address];
+                    }
+            }
+        }
+        return 0xff;
+    }
+
+    writeRAM(address, value) {
+        if (this.ramEnable) {
+            switch (this.cartridgeType) {
+                case 0x00:
+                    break;
+                case 0x08:
+                case 0x09:
+                    this.ram[address] = value;
+                    break;
+                case 0x01:
+                    break;
+                case 0x02:
+                case 0x03:
+                    this.ram[(this.ramBankNumber << 13) | address] = value;
+                    break;
+                case 0x05:
+                case 0x06:
+                    this.ram[address & 0x1ff] = value & 0xf;
+                    break;
+                case 0x11:
+                    break;
+                case 0x12:
+                case 0x13:
+                case 0x0f:
+                case 0x10:
+                    switch (this.ramBankNumber) {
+                        case 0x00:
+                        case 0x01:
+                        case 0x02:
+                        case 0x03:
+                            this.ram[(this.ramBankNumber << 13) | address] = value;
+                            break;
+                        case 0x08:
+                            this.rtc.s = value;
+                            break;
+                        case 0x09:
+                            this.rtc.m = value;
+                            break;
+                        case 0x0a:
+                            this.rtc.h = value;
+                            break;
+                        case 0x0b:
+                            this.rtc.dl = value;
+                            break;
+                        case 0x0c:
+                            this.rtc.dh = value;
+                            break;
+                    }
+                    break;
+                case 0x19:
+                case 0x1a:
+                case 0x1b:
+                case 0x1c:
+                case 0x1d:
+                case 0x1e:
+                    this.ram[(this.ramBankNumber << 13) | address] = value;
+                    break;
+                case 0xff:
+                    if (this.irSelect) {
+                        this.irOn = (value & 0x1) != 0;
+                    } else {
+                        this.ram[(this.ramBankNumber << 13) | address] = value;
+                    }
+                    break;
+            }
+        }
+    }
+
+    load(file) {
+        this.title = new TextDecoder('ascii').decode(file.slice(0x134, 0x144));
+
+        const cgb = file[0x143];
+        this.gb.cgb = (cgb & 0x80) != 0;
+        this.gb.a = cgb ? 0x11 : 0x01;
+
+        this.cartridgeType = file[0x147];
+        switch (this.cartridgeType) {
+            case 0x09:
+                this.hasBattery = true;
+            case 0x08:
+                this.ramEnable = true;
+                this.hasRAM = true;
+            case 0x00:
+                this.rom = file;
+                break;
+            case 0x03:
+                this.hasBattery = true;
+            case 0x02:
+                this.ramEnable = false;
+                this.ramBankMode = false;
+                this.hasRAM = true;
+            case 0x01:
+                this.rom = file;
+                this.romBankNumber = 1;
+                break;
+            case 0x06:
+                this.hasBattery = true;
+            case 0x05:
+                this.rom = file;
+                this.romBankNumber = 1;
+                this.ram = new Uint8Array(0x200);
+                this.ramEnable = false;
+                this.hasRAM = true;
+                break;
+            case 0x10:
+                this.hasRAM = true;
+            case 0x0f:
+                this.rom = file;
+                this.romBankNumber = 1;
+                this.ramEnable = false;
+                this.hasBattery = true;
+                this.hasRTC = true;
+                break;
+            case 0x13:
+                this.hasBattery = true;
+            case 0x12:
+                this.ramEnable = false;
+                this.hasRAM = true;
+            case 0x11:
+                this.rom = file;
+                this.romBankNumber = 1;
+                break;
+            case 0x1e:
+            case 0x1b:
+                this.hasBattery = true;
+            case 0x1d:
+            case 0x1a:
+                this.ramEnable = false;
+                this.hasRAM = true;
+            case 0x1c:
+            case 0x19:
+                this.rom = file;
+                this.romBankNumber = 1;
+                break;
+            case 0xff:
+                this.rom = file;
+                this.romBankNumber = 1;
+                this.ramEnable = true;
+                this.hasRAM = true;
+                this.hasBattery = true;
+                break;
+            default:
+                throw 'unknown cartridge type: 0x' + this.cartridgeType.toString(16);
+        }
+
+        const romSize = 32768 << file[0x148];
+        if (file.length != romSize) {
+            throw 'wrong file size';
+        }
+
+        const ramSize = file[0x149];
+        if (this.hasRAM) {
+            /**
+             * this cartridge type
+             * does not directly access localStorage from webworker
+             */
+            /*
+            if (this.hasBattery && this.title in localStorage) {
+                this.ram = new Uint8Array(localStorage[this.title].split(',').map(parseFloat));
+            } else {
+             */
+                switch (ramSize) {
+                    case 0x00:
+                        break;
+                    case 0x02:
+                        this.ram = new Uint8Array(0x2000);
+                        break;
+                    case 0x03:
+                        this.ram = new Uint8Array(0x8000);
+                        break;
+                    case 0x04:
+                        this.ram = new Uint8Array(0x20000);
+                        break;
+                    case 0x05:
+                        this.ram = new Uint8Array(0x10000);
+                        break;
+                    default:
+                        throw 'unknown RAM size: 0x' + ramSize.toString(16);
+                }
+            //}
+        }
+        if (this.hasRTC) {
+            if (this.hasBattery && (this.title + 'TIME') in localStorage) {
+                this.rtc = new RTC();
+                Object.assign(this.rtc, JSON.parse(localStorage[this.title + 'TIME']));
+            } else {
+                this.rtc = new RTC();
+            }
+        }
+    }
+
+    save() {
+        if (this.hasRAM && this.hasBattery) {
+            localStorage[this.title] = this.ram;
+        }
+        if (this.hasRTC && this.hasBattery) {
+            localStorage[this.title + 'TIME'] = JSON.stringify(this.rtc);
+        }
+    }
+}
+
 
 /***/ }),
 
@@ -46,7 +496,1333 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
   \*****************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   GameBoy: () => (/* binding */ GameBoy)\n/* harmony export */ });\n/* harmony import */ var _cartridge_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./cartridge.js */ \"./public/js/gb/cartridge.js\");\n/* harmony import */ var _display_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./display.js */ \"./public/js/gb/display.js\");\n/* harmony import */ var _joypad_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./joypad.js */ \"./public/js/gb/joypad.js\");\n/* harmony import */ var _serial_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./serial.js */ \"./public/js/gb/serial.js\");\n/* harmony import */ var _sound_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./sound.js */ \"./public/js/gb/sound.js\");\n/* harmony import */ var _timer_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./timer.js */ \"./public/js/gb/timer.js\");\n/* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ../../dummylogger.js */ \"./public/dummylogger.js\");\n // Adjust the import based on the actual exports\n\n\n\n\n\n // Adjust based on actual exports\n\nclass GameBoy {\n  constructor(flagSharedBuffer, sbSharedBuffer, scSharedBuffer,\n      transferTriggerSharedBuffer,\n      useInternalClockSharedBuffer,\n      sharedBuffer,\n      timingBuffer,\n      waitScBuffer,\n      keySharedBuffer,\n      scDirtySharedBuffer,\n      scMonitorStartSharedBuffer,\n      soundLeftSab,\n      soundRightSab) {\n    this.display = new _display_js__WEBPACK_IMPORTED_MODULE_1__.Display(this);\n    this.timer = new _timer_js__WEBPACK_IMPORTED_MODULE_5__.Timer(this);\n    this.joypad = new _joypad_js__WEBPACK_IMPORTED_MODULE_2__.Joypad(this, keySharedBuffer);\n    this.cartridge = new _cartridge_js__WEBPACK_IMPORTED_MODULE_0__.Cartridge(this);\n    this.sound = new _sound_js__WEBPACK_IMPORTED_MODULE_4__.Sound(this, soundLeftSab, soundRightSab);\n    this.serial = new _serial_js__WEBPACK_IMPORTED_MODULE_3__.Serial(this, sbSharedBuffer, scSharedBuffer,\n        transferTriggerSharedBuffer,\n        useInternalClockSharedBuffer, sharedBuffer);\n\n    this.a = 0;\n    this.fz = false;\n    this.fn = false;\n    this.fh = false;\n    this.fc = false;\n    this.b = 0;\n    this.c = 0;\n    this.d = 0;\n    this.e = 0;\n    this.h = 0;\n    this.l = 0;\n    this._pc = 0x0100;\n    this._sp = 0xfffe;\n\n    this.ime = false;\n\n    this.halt = false;\n\n    //this._if = 0;\n    this._if = new Int32Array(flagSharedBuffer);\n\n    this._ie = 0;\n\n    this._svbk = 0;\n\n    this.doubleSpeed = false;\n    this.speedTrigger = false;\n\n    this.irReadEnable = 0;\n    this.irOn = false;\n\n    this.wram = new Uint8Array(0x8000);\n    this.hram = new Uint8Array(0x7f);\n\n    this.cgb = false;\n    this.cycles = 0;\n\n    this._waitForIO = false;\n\n    this._timing = new Int32Array(timingBuffer);\n\n    this._messenger = null;\n\n    this._lock = new Int32Array(sharedBuffer);\n\n    this._waitForSc = new Int32Array(waitScBuffer);\n\n    this._scDirty = new Int32Array(scDirtySharedBuffer);\n\n    this._scMonitor = new Int32Array(scMonitorStartSharedBuffer);\n  }\n\n  get waitForIO() {\n    return this._waitForIO;\n  }\n\n  set waitForIO(value) {\n    this._waitForIO = value;\n  }\n\n  get timing() {\n    return this._timing;\n  }\n\n  get f() {\n    return (this.fz << 7) | (this.fn << 6) | (this.fh << 5) | (this.fc << 4);\n  }\n\n  set f(value) {\n    this.fz = (value & 0x80) != 0;\n    this.fn = (value & 0x40) != 0;\n    this.fh = (value & 0x20) != 0;\n    this.fc = (value & 0x10) != 0;\n  }\n\n  get bc() {\n    return (this.b << 8) | this.c;\n  }\n\n  get de() {\n    return (this.d << 8) | this.e;\n  }\n\n  get hl() {\n    return (this.h << 8) | this.l;\n  }\n\n  get sp() {\n    return this._sp;\n  }\n\n  get sph() {\n    return this._sp >> 8;\n  }\n\n  get spl() {\n    return this._sp & 0xff;\n  }\n\n  get pc() {\n    return this._pc;\n  }\n\n  get pch() {\n    return this._pc >> 8;\n  }\n\n  get pcl() {\n    return this._pc & 0xff;\n  }\n\n  set bc(value) {\n    this.b = (value >> 8) & 0xff;\n    this.c = value & 0xff;\n  }\n\n  set de(value) {\n    this.d = (value >> 8) & 0xff;\n    this.e = value & 0xff;\n  }\n\n  set hl(value) {\n    this.h = (value >> 8) & 0xff;\n    this.l = value & 0xff;\n  }\n\n  set sp(value) {\n    this._sp = value & 0xffff;\n  }\n\n  set pc(value) {\n    this._pc = value & 0xffff;\n  }\n\n  get svbk() {\n    if (!this.cgb) {\n      return 0xff;\n    }\n    return 0xf8 | this._svbk;\n  }\n\n  set svbk(value) {\n    if (!this.cgb) {\n      return;\n    }\n    this._svbk = value & 0x7;\n  }\n\n  get key1() {\n    if (!this.cgb) {\n      return 0xff;\n    }\n    return 0x7e | (this.doubleSpeed << 7) | this.speedTrigger;\n  }\n\n  set key1(value) {\n    if (!this.cgb) {\n      return;\n    }\n    this.speedTrigger = (value & 0x1) != 0;\n  }\n\n  get rp() {\n    if (!this.cgb) {\n      return 0xff;\n    }\n    return 0x3c | (this.irReadEnable << 6) | (!(this.irReadEnable && this.irOn)\n        << 1) | this.irOn;\n  }\n\n  set rp(value) {\n    if (!this.cgb) {\n      return;\n    }\n    this.irReadEnable = (value & 0xc0) >> 6;\n    this.irOn = (value & 0x1) != 0;\n  }\n\n  get if() {\n    return 0xe0 | this._if[0];\n  }\n\n  set if(value) {\n    //this._if[0] = value & GameBoy.interrupts;\n    Atomics.store(this._if, 0, value & GameBoy.interrupts);\n  }\n\n  get ie() {\n    return this._ie;\n  }\n\n  set ie(value) {\n    this._ie = value & GameBoy.interrupts;\n  }\n\n  setMessenger(messenger) {\n    this._messenger = messenger;\n    this.serial.messenger = messenger;\n    this.sound.messenger = messenger;\n  }\n\n  requestInterrupt(interrupt) {\n    //this._if[0] |= interrupt;\n    Atomics.or(this._if, 0, interrupt);\n  }\n\n  clearInterrupt(interrupt) {\n    //this._if[0] &= ~interrupt;\n    Atomics.and(this._if, 0, ~interrupt);\n  }\n\n  callInterrupt(address) {\n    this.writeAddress(--this.sp, this.pch);\n    this.writeAddress(--this.sp, this.pcl);\n    this.pc = address;\n  }\n\n  readWRAM(address) {\n    switch (address >> 12) {\n      case 0:\n        return this.wram[address];\n      case 1:\n        return this.wram[((this._svbk == 0 ? 1 : this._svbk) << 12) | (address\n            & 0xfff)];\n    }\n  }\n\n  writeWRAM(address, value) {\n    switch (address >> 12) {\n      case 0:\n        this.wram[address] = value;\n        break;\n      case 1:\n        this.wram[((this._svbk == 0 ? 1 : this._svbk) << 12) | (address\n            & 0xfff)] = value;\n        break;\n    }\n  }\n\n  readAddress(address) {\n    switch (address >> 13) {\n      case 0x0:\n      case 0x1:\n      case 0x2:\n      case 0x3:\n        return this.cartridge.readROM(address & 0x7fff);\n      case 0x4:\n        return this.display.readVRAM(address & 0x1fff);\n      case 0x5:\n        return this.cartridge.readRAM(address & 0x1fff);\n      case 0x6:\n        return this.readWRAM(address & 0x1fff);\n      case 0x7:\n        if (address <= 0xfdff) {\n          return this.readWRAM(address & 0x1fff);\n        } else if (address <= 0xfe9f) {\n          return this.display.oam[address & 0xff];\n        } else if (address <= 0xfeff) {\n          return 0xff;\n        } else if (address <= 0xff7f) {\n          if (address >= 0xff10 && address <= 0xff3f) {\n            return this.sound.readAddress(address & 0xff);\n          } else {\n            switch (address & 0xff) {\n              case 0x00:\n                return this.joypad.p1;\n              case 0x01:\n                //customLog(\"[get sb by cpu] \");\n                return this.serial.sb;\n              case 0x02:\n                //customLog(\"[get sc by cpu] \");\n                return this.serial.sc;\n              case 0x04:\n                return this.timer.div;\n              case 0x05:\n                return this.timer.tima;\n              case 0x06:\n                return this.timer.tma;\n              case 0x07:\n                return this.timer.tac;\n              case 0x0f:\n                return this.if;\n              case 0x40:\n                return this.display.lcdc;\n              case 0x41:\n                return this.display.stat;\n              case 0x42:\n                return this.display.scy;\n              case 0x43:\n                return this.display.scx;\n              case 0x44:\n                return this.display.ly;\n              case 0x45:\n                return this.display.lyc;\n              case 0x47:\n                return this.display.bgp;\n              case 0x48:\n                return this.display.obp0;\n              case 0x49:\n                return this.display.obp1;\n              case 0x4a:\n                return this.display.wy;\n              case 0x4b:\n                return this.display.wx;\n              case 0x4d:\n                return this.key1;\n              case 0x4f:\n                return this.display.vbk;\n              case 0x55:\n                return this.display.hdma5;\n              case 0x56:\n                return this.rp;\n              case 0x68:\n                return this.display.bcps;\n              case 0x69:\n                return this.display.bcpd;\n              case 0x6a:\n                return this.display.ocps;\n              case 0x6b:\n                return this.display.ocpd;\n              case 0x70:\n                return this.svbk;\n              default:\n                return 0xff;\n            }\n          }\n        } else if (address <= 0xfffe) {\n          return this.hram[address & 0x7f];\n        } else {\n          return this.ie;\n        }\n    }\n  }\n\n  writeAddress(address, value) {\n    switch (address >> 13) {\n      case 0x0:\n      case 0x1:\n      case 0x2:\n      case 0x3:\n        this.cartridge.writeROM(address & 0x7fff, value);\n        break;\n      case 0x4:\n        this.display.writeVRAM(address & 0x1fff, value);\n        break;\n      case 0x5:\n        this.cartridge.writeRAM(address & 0x1fff, value);\n        break;\n      case 0x6:\n        this.writeWRAM(address & 0x1fff, value);\n        break;\n      case 0x7:\n        if (address <= 0xfdff) {\n          this.writeWRAM(address & 0x1fff, value);\n        } else if (address <= 0xfe9f) {\n          this.display.oam[address & 0xff] = value;\n        } else if (address <= 0xfeff) {\n\n        } else if (address <= 0xff7f) {\n          if (address >= 0xff10 && address <= 0xff3f) {\n            this.sound.writeAddress(address & 0xff, value);\n          } else {\n            switch (address & 0xff) {\n              case 0x00:\n                this.joypad.p1 = value;\n                break;\n              case 0x01:\n                //customLog(\"[set sb by cpu] \");\n                this.serial.sb = value;\n                break;\n              case 0x02:\n                //customLog(\"[set sc by cpu] \");\n                this.serial.sc = value;\n\n                if ((value | 0x7E) === 0xFE) {\n                  Atomics.store(this._waitForSc, 0, 1);\n                  (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_6__.customLog)(\"update sc \", value);\n\n                  self.postMessage({msg: 'sc', payload: -1, time:-1});\n                  /*\n                  if(Atomics.load(this._scDirty, 0) === 1) {\n                    //Atomics.store(this._lock, 0, 1);\n                    //Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0\n                  }\n                   */\n                }\n\n                break;\n              case 0x04:\n                this.timer.div = value;\n                break;\n              case 0x05:\n                this.timer.tima = value;\n                break;\n              case 0x06:\n                this.timer.tma = value;\n                break;\n              case 0x07:\n                this.timer.tac = value;\n                break;\n              case 0x0f:\n                this.if = value;\n                break;\n              case 0x40:\n                this.display.lcdc = value;\n                break;\n              case 0x41:\n                this.display.stat = value;\n                break;\n              case 0x42:\n                this.display.scy = value;\n                break;\n              case 0x43:\n                this.display.scx = value;\n                break;\n              case 0x45:\n                this.display.lyc = value;\n                break;\n              case 0x46:\n                this.display.dma = value;\n                break;\n              case 0x47:\n                this.display.bgp = value;\n                break;\n              case 0x48:\n                this.display.obp0 = value;\n                break;\n              case 0x49:\n                this.display.obp1 = value;\n                break;\n              case 0x4a:\n                this.display.wy = value;\n                break;\n              case 0x4b:\n                this.display.wx = value;\n                break;\n              case 0x4d:\n                this.key1 = value;\n                break;\n              case 0x4f:\n                this.display.vbk = value;\n                break;\n              case 0x51:\n                this.display.hdma1 = value;\n                break;\n              case 0x52:\n                this.display.hdma2 = value;\n                break;\n              case 0x53:\n                this.display.hdma3 = value;\n                break;\n              case 0x54:\n                this.display.hdma4 = value;\n                break;\n              case 0x55:\n                this.display.hdma5 = value;\n                break;\n              case 0x56:\n                this.rp = value;\n                break;\n              case 0x68:\n                this.display.bcps = value;\n                break;\n              case 0x69:\n                this.display.bcpd = value;\n                break;\n              case 0x6a:\n                this.display.ocps = value;\n                break;\n              case 0x6b:\n                this.display.ocpd = value;\n                break;\n              case 0x70:\n                this.svbk = value;\n                break;\n              default:\n                break;\n            }\n          }\n        } else if (address <= 0xfffe) {\n          this.hram[address & 0x7f] = value;\n        } else {\n          this.ie = value;\n        }\n        break;\n    }\n  }\n\n  readRegister(register) {\n    switch (register) {\n      case 0:\n        return this.b;\n      case 1:\n        return this.c;\n      case 2:\n        return this.d;\n      case 3:\n        return this.e;\n      case 4:\n        return this.h;\n      case 5:\n        return this.l;\n      case 6:\n        return this.readAddress(this.hl);\n      case 7:\n        return this.a;\n    }\n  }\n\n  writeRegister(register, value) {\n    switch (register) {\n      case 0:\n        this.b = value;\n        break;\n      case 1:\n        this.c = value;\n        break;\n      case 2:\n        this.d = value;\n        break;\n      case 3:\n        this.e = value;\n        break;\n      case 4:\n        this.h = value;\n        break;\n      case 5:\n        this.l = value;\n        break;\n      case 6:\n        this.writeAddress(this.hl, value);\n        break;\n      case 7:\n        this.a = value;\n        break;\n    }\n  }\n\n  readDoubleRegisterIndirect(register) {\n    switch (register) {\n      case 0:\n        return this.readAddress(this.bc);\n      case 1:\n        return this.readAddress(this.de);\n      case 2:\n        return this.readAddress(this.hl++);\n      case 3:\n        return this.readAddress(this.hl--);\n    }\n  }\n\n  writeDoubleRegisterIndirect(register, value) {\n    switch (register) {\n      case 0:\n        this.writeAddress(this.bc, value);\n        break;\n      case 1:\n        this.writeAddress(this.de, value);\n        break;\n      case 2:\n        this.writeAddress(this.hl++, value);\n        break;\n      case 3:\n        this.writeAddress(this.hl--, value);\n        break;\n    }\n  }\n\n  readDoubleRegister(register) {\n    switch (register) {\n      case 0:\n        return this.bc;\n      case 1:\n        return this.de;\n      case 2:\n        return this.hl;\n      case 3:\n        return this.sp;\n    }\n  }\n\n  writeDoubleRegister(register, value) {\n    switch (register) {\n      case 0:\n        this.bc = value;\n        break;\n      case 1:\n        this.de = value;\n        break;\n      case 2:\n        this.hl = value;\n        break;\n      case 3:\n        this.sp = value;\n        break;\n    }\n  }\n\n  popDoubleRegister(register) {\n    switch (register) {\n      case 0:\n        this.c = this.readAddress(this.sp++);\n        this.b = this.readAddress(this.sp++);\n        break;\n      case 1:\n        this.e = this.readAddress(this.sp++);\n        this.d = this.readAddress(this.sp++);\n        break;\n      case 2:\n        this.l = this.readAddress(this.sp++);\n        this.h = this.readAddress(this.sp++);\n        break;\n      case 3:\n        this.f = this.readAddress(this.sp++);\n        this.a = this.readAddress(this.sp++);\n        break;\n    }\n  }\n\n  pushDoubleRegister(register) {\n    switch (register) {\n      case 0:\n        this.writeAddress(--this.sp, this.b);\n        this.writeAddress(--this.sp, this.c);\n        break;\n      case 1:\n        this.writeAddress(--this.sp, this.d);\n        this.writeAddress(--this.sp, this.e);\n        break;\n      case 2:\n        this.writeAddress(--this.sp, this.h);\n        this.writeAddress(--this.sp, this.l);\n        break;\n      case 3:\n        this.writeAddress(--this.sp, this.a);\n        this.writeAddress(--this.sp, this.f);\n        break;\n    }\n  }\n\n  readCondition(condition) {\n    switch (condition) {\n      case 0:\n        return !this.fz;\n      case 1:\n        return this.fz;\n      case 2:\n        return !this.fc;\n      case 3:\n        return this.fc;\n    }\n  }\n\n  runHdma() {\n    this.writeAddress(0x8000 | this.display.hdmaDst++,\n        this.readAddress(this.display.hdmaSrc++));\n    if ((this.display.hdmaDst & 0xf) == 0) {\n      this.display.hdmaCounter--;\n      if (this.display.hdmaCounter == 0) {\n        this.display.hdmaOn = false;\n        this.display.hblankHdmaOn = false;\n        this.display.hdmaTrigger = false;\n      }\n      if (this.display.hblankHdmaOn) {\n        this.display.hdmaOn = false;\n      }\n    }\n  }\n\n  cycle() {\n\n    Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0\n\n    //Atomics.add(this._timing, 0, 1);\n\n    let cycles = 0;\n    if ((this.ime || this.halt) && (this.ie & this.if) != 0) {\n      this.halt = false;\n      if (this.ime) {\n        this.ime = false;\n        if ((this.ie & this.if & GameBoy.vblankInterrupt) != 0) {\n          this.clearInterrupt(GameBoy.vblankInterrupt);\n          this.callInterrupt(0x0040);\n        } else if ((this.ie & this.if & GameBoy.statInterrupt) != 0) {\n          this.clearInterrupt(GameBoy.statInterrupt);\n          this.callInterrupt(0x0048);\n        } else if ((this.ie & this.if & GameBoy.timerInterrupt) != 0) {\n          this.clearInterrupt(GameBoy.timerInterrupt);\n          this.callInterrupt(0x0050);\n        } else if ((this.ie & this.if & GameBoy.serialInterrupt) != 0) {\n          this.clearInterrupt(GameBoy.serialInterrupt);\n          this.callInterrupt(0x0058);\n        } else if ((this.ie & this.if & GameBoy.joypadInterrupt) != 0) {\n          this.clearInterrupt(GameBoy.joypadInterrupt);\n          this.callInterrupt(0x0060);\n        }\n        cycles += 5;\n      }\n    } else {\n      cycles += (this.halt || this.display.hdmaOn) ? 1 : this.decode();\n    }\n\n    let hardwareCycles = cycles;\n    while (hardwareCycles > 0) {\n      this.timer.cycle();\n      this.serial.cycle();\n      hardwareCycles--;\n    }\n\n    this.cycles += cycles / (this.doubleSpeed ? 2 : 1);\n    while (this.cycles > 0) {\n      if (this.display.hdmaOn) {\n        this.runHdma();\n      }\n      this.display.cycle();\n      this.sound.cycle();\n      this.cycles--;\n    }\n\n    if (this.display.hdmaTrigger) {\n      this.display.hdmaTrigger = false;\n      this.display.hdmaOn = true;\n    }\n\n    return cycles / (this.doubleSpeed ? 2 : 1);\n  }\n\n  decode() {\n    const instr = this.readAddress(this.pc++);\n    let cycles = GameBoy.instrCycles[instr];\n    const quad = instr >> 6, op1 = (instr & 0x3f) >> 3, op2 = instr & 0x7;\n    if (quad === 0) {\n      if (op2 == 6) {\n        // LD r, n\n        const imm = this.readAddress(this.pc++);\n        this.writeRegister(op1, imm);\n      } else if (op2 == 2) {\n        if ((op1 & 0x1) != 0) {\n          // LD A, (rr)\n          this.a = this.readDoubleRegisterIndirect(op1 >> 1);\n        } else {\n          // LD (rr), A\n          this.writeDoubleRegisterIndirect(op1 >> 1, this.a);\n        }\n      } else if ((op1 & 0x1) == 0 && op2 == 1) {\n        // LD dd, nn\n        const imm1 = this.readAddress(this.pc++);\n        const imm2 = this.readAddress(this.pc++);\n        this.writeDoubleRegister(op1 >> 1, (imm2 << 8) | imm1);\n      } else if (op1 == 1 && op2 == 0) {\n        // LD (nn), SP\n        const imm1 = this.readAddress(this.pc++);\n        const imm2 = this.readAddress(this.pc++);\n        let address = (imm2 << 8) | imm1;\n        this.writeAddress(address++, this.spl);\n        this.writeAddress(address++, this.sph);\n      } else if (op2 == 4) {\n        // INC r\n        const tmp = (this.readRegister(op1) + 1) & 0xff;\n        this.writeRegister(op1, tmp);\n        this.fh = (tmp & 0xf) == 0;\n        this.fn = false;\n        this.fz = tmp == 0;\n      } else if (op2 == 5) {\n        // DEC r\n        const tmp = (this.readRegister(op1) - 1) & 0xff;\n        this.writeRegister(op1, tmp);\n        this.fh = (tmp & 0xf) == 0xf;\n        this.fn = true;\n        this.fz = tmp == 0;\n      } else if ((op1 & 0x1) != 0 && op2 == 1) {\n        // ADD HL, ss\n        const ss = this.readDoubleRegister(op1 >> 1);\n        this.fc = this.hl + ss > 0xffff;\n        this.fh = (this.hl & 0xfff) + (ss & 0xfff) > 0xfff;\n        this.fn = false;\n        this.hl += ss;\n      } else if ((op1 & 0x1) == 0 && op2 == 3) {\n        // INC ss\n        this.writeDoubleRegister(op1 >> 1,\n            this.readDoubleRegister(op1 >> 1) + 1);\n      } else if ((op1 & 0x1) != 0 && op2 == 3) {\n        // DEC ss\n        this.writeDoubleRegister(op1 >> 1,\n            this.readDoubleRegister(op1 >> 1) - 1);\n      } else if (op1 == 0 && op2 == 7) {\n        // RLCA\n        const carry = this.a & 0x80;\n        this.a = ((this.a << 1) | (carry >> 7)) & 0xff;\n        this.fc = carry != 0;\n        this.fh = false;\n        this.fn = false;\n        this.fz = false;\n      } else if (op1 == 1 && op2 == 7) {\n        // RRCA\n        const carry = this.a & 0x1;\n        this.a = ((carry << 7) | (this.a >> 1)) & 0xff;\n        this.fc = carry != 0;\n        this.fh = false;\n        this.fn = false;\n        this.fz = false;\n      } else if (op1 == 2 && op2 == 7) {\n        // RLA\n        const carry = this.a & 0x80;\n        this.a = ((this.a << 1) | this.fc) & 0xff;\n        this.fc = carry != 0;\n        this.fh = false;\n        this.fn = false;\n        this.fz = false;\n      } else if (op1 == 3 && op2 == 7) {\n        // RRA\n        const carry = this.a & 0x1;\n        this.a = ((this.fc << 7) | (this.a >> 1)) & 0xff;\n        this.fc = carry != 0;\n        this.fh = false;\n        this.fn = false;\n        this.fz = false;\n      } else if (op1 == 3 && op2 == 0) {\n        // JR e\n        const offset = this.readAddress(this.pc++) << 24 >> 24;\n        this.pc += offset;\n      } else if ((op1 & 0x4) != 0 && op2 == 0) {\n        // JR cc, e\n        const offset = this.readAddress(this.pc++) << 24 >> 24;\n        if (this.readCondition(op1 & 0x3)) {\n          this.pc += offset;\n          cycles += 1;\n        }\n      } else if (op1 == 4 && op2 == 7) {\n        // DAA\n        let tmp = this.a;\n        if (!this.fn) {\n          if (this.fc || tmp > 0x99) {\n            tmp += 0x60;\n            this.fc = true;\n          }\n          if (this.fh || (tmp & 0xf) > 0x9) {\n            tmp += 0x06;\n          }\n        } else {\n          if (this.fc) {\n            tmp -= 0x60;\n          }\n          if (this.fh) {\n            tmp -= 0x6;\n          }\n        }\n        this.fh = false;\n        this.fz = (tmp & 0xff) == 0;\n        this.a = tmp & 0xff;\n      } else if (op1 == 5 && op2 == 7) {\n        // CPL\n        this.a ^= 0xff;\n        this.fh = true;\n        this.fn = true;\n      } else if (op1 == 0 && op2 == 0) {\n        // NOP\n      } else if (op1 == 6 && op2 == 7) {\n        // SCF\n        this.fc = true;\n        this.fh = false;\n        this.fn = false;\n      } else if (op1 == 7 && op2 == 7) {\n        // CCF\n        this.fc = !this.fc;\n        this.fh = false;\n        this.fn = false;\n      } else if (op1 == 2 && op2 == 0) {\n        // STOP\n        this.pc++;\n        if (this.speedTrigger) {\n          this.speedTrigger = false;\n          this.doubleSpeed = !this.doubleSpeed;\n        }\n      }\n    } else if (quad === 1) {\n      if (op1 != 6 || op2 != 6) {\n        // LD r, r'\n        this.writeRegister(op1, this.readRegister(op2));\n      } else {\n        // HALT\n        this.halt = true;\n      }\n    } else if (quad === 2) {\n      const r = this.readRegister(op2);\n      if (op1 == 0) {\n        // ADD A, r\n        const tmp = this.a + r;\n        this.fc = tmp > 0xff;\n        this.fh = (this.a & 0xf) + (r & 0xf) > 0xf;\n        this.fn = false;\n        this.fz = (tmp & 0xff) == 0;\n        this.a = tmp & 0xff;\n      } else if (op1 == 1) {\n        // ADC A, r\n        const carry = this.fc;\n        const tmp = this.a + r + carry;\n        this.fc = tmp > 0xff;\n        this.fh = (this.a & 0xf) + (r & 0xf) + carry > 0xf;\n        this.fn = false;\n        this.fz = (tmp & 0xff) == 0;\n        this.a = tmp & 0xff;\n      } else if (op1 == 2) {\n        // SUB A, r\n        const tmp = this.a - r;\n        this.fc = tmp < 0;\n        this.fh = (this.a & 0xf) - (r & 0xf) < 0;\n        this.fn = true;\n        this.fz = (tmp & 0xff) == 0;\n        this.a = tmp & 0xff;\n      } else if (op1 == 3) {\n        // SBC A, r\n        const carry = this.fc\n        const tmp = this.a - r - carry;\n        this.fc = tmp < 0;\n        this.fh = (this.a & 0xf) - (r & 0xf) - carry < 0;\n        this.fn = true;\n        this.fz = (tmp & 0xff) == 0;\n        this.a = tmp & 0xff;\n      } else if (op1 == 4) {\n        // AND A, r\n        const tmp = this.a & r;\n        this.fc = false;\n        this.fh = true;\n        this.fn = false;\n        this.fz = tmp == 0;\n        this.a = tmp;\n      } else if (op1 == 5) {\n        // XOR A, r\n        const tmp = this.a ^ r;\n        this.fc = false;\n        this.fh = false;\n        this.fn = false;\n        this.fz = tmp == 0;\n        this.a = tmp;\n      } else if (op1 == 6) {\n        // OR A, r\n        const tmp = this.a | r;\n        this.a |= r;\n        this.fc = false;\n        this.fh = false;\n        this.fn = false;\n        this.fz = tmp == 0;\n        this.a = tmp;\n      } else if (op1 == 7) {\n        // CP A, r\n        const tmp = this.a - r;\n        this.fc = tmp < 0;\n        this.fh = (this.a & 0xf) - (r & 0xf) < 0;\n        this.fn = true;\n        this.fz = (tmp & 0xff) == 0;\n      }\n    } else if (quad === 3) {\n      if (op1 == 6 && op2 == 2) {\n        // LD A, (C)\n        this.a = this.readAddress(0xff00 | this.c);\n      } else if (op1 == 4 && op2 == 2) {\n        // LD (C), A\n        this.writeAddress(0xff00 | this.c, this.a);\n      } else if (op1 == 6 && op2 == 0) {\n        // LD A, (n)\n        const imm = this.readAddress(this.pc++);\n        this.a = this.readAddress(0xff00 | imm);\n      } else if (op1 == 4 && op2 == 0) {\n        // LD (n), A\n        const imm = this.readAddress(this.pc++);\n        this.writeAddress(0xff00 | imm, this.a);\n      } else if (op1 == 7 && op2 == 2) {\n        // LD A, (nn)\n        const imm1 = this.readAddress(this.pc++);\n        const imm2 = this.readAddress(this.pc++);\n        this.a = this.readAddress((imm2 << 8) | imm1);\n      } else if (op1 == 5 && op2 == 2) {\n        // LD (nn), A\n        const imm1 = this.readAddress(this.pc++);\n        const imm2 = this.readAddress(this.pc++);\n        this.writeAddress((imm2 << 8) | imm1, this.a);\n      } else if (op1 == 7 && op2 == 1) {\n        // LD SP, HL\n        this.sp = this.hl;\n      } else if ((op1 & 0x1) == 0 && op2 == 5) {\n        // PUSH qq\n        this.pushDoubleRegister(op1 >> 1);\n      } else if ((op1 & 0x1) == 0 && op2 == 1) {\n        // POP qq\n        this.popDoubleRegister(op1 >> 1);\n      } else if (op1 == 7 && op2 == 0) {\n        // LDHL SP, e\n        const offset = this.readAddress(this.pc++) << 24 >> 24;\n        const tmp = this.sp + offset;\n        this.fc = (this.sp & 0xff) + (offset & 0xff) > 0xff;\n        this.fh = (this.sp & 0xf) + (offset & 0xf) > 0xf;\n        this.fn = false;\n        this.fz = false;\n        this.hl = tmp;\n      } else if (op1 == 5 && op2 == 0) {\n        // ADD SP, e\n        const offset = this.readAddress(this.pc++) << 24 >> 24;\n        const tmp = this.sp + offset;\n        this.fc = (this.sp & 0xff) + (offset & 0xff) > 0xff;\n        this.fh = (this.sp & 0xf) + (offset & 0xf) > 0xf;\n        this.fn = false;\n        this.fz = false;\n        this.sp = tmp;\n      } else if (op1 == 0 && op2 == 6) {\n        // ADD A, n\n        const imm = this.readAddress(this.pc++);\n        const tmp = this.a + imm\n        this.fc = tmp > 0xff;\n        this.fh = (this.a & 0xf) + (imm & 0xf) > 0xf;\n        this.fn = false;\n        this.fz = (tmp & 0xff) == 0;\n        this.a = tmp & 0xff;\n      } else if (op1 == 1 && op2 == 6) {\n        // ADC A, n\n        const imm = this.readAddress(this.pc++);\n        const carry = this.fc;\n        const tmp = this.a + imm + carry\n        this.fc = tmp > 0xff;\n        this.fh = (this.a & 0xf) + (imm & 0xf) + carry > 0xf;\n        this.fn = false;\n        this.fz = (tmp & 0xff) == 0;\n        this.a = tmp & 0xff;\n      } else if (op1 == 2 && op2 == 6) {\n        // SUB A, n\n        const imm = this.readAddress(this.pc++);\n        const tmp = this.a - imm;\n        this.fc = tmp < 0;\n        this.fh = (this.a & 0xf) - (imm & 0xf) < 0;\n        this.fn = true;\n        this.fz = (tmp & 0xff) == 0;\n        this.a = tmp & 0xff;\n      } else if (op1 == 3 && op2 == 6) {\n        // SBC A, n\n        const imm = this.readAddress(this.pc++);\n        const carry = this.fc;\n        const tmp = this.a - imm - carry;\n        this.fc = tmp < 0;\n        this.fh = (this.a & 0xf) - (imm & 0xf) - carry < 0;\n        this.fn = true;\n        this.fz = (tmp & 0xff) == 0;\n        this.a = tmp & 0xff;\n      } else if (op1 == 4 && op2 == 6) {\n        // AND A, n\n        const imm = this.readAddress(this.pc++);\n        const tmp = this.a & imm;\n        this.fc = false;\n        this.fh = true;\n        this.fn = false;\n        this.fz = tmp == 0;\n        this.a = tmp;\n      } else if (op1 == 5 && op2 == 6) {\n        // XOR A, n\n        const imm = this.readAddress(this.pc++);\n        const tmp = this.a ^ imm;\n        this.fc = false;\n        this.fh = false;\n        this.fn = false;\n        this.fz = tmp == 0;\n        this.a = tmp;\n      } else if (op1 == 6 && op2 == 6) {\n        // OR A, n\n        const imm = this.readAddress(this.pc++);\n        const tmp = this.a | imm;\n        this.fc = false;\n        this.fh = false;\n        this.fn = false;\n        this.fz = tmp == 0;\n        this.a = tmp;\n      } else if (op1 == 7 && op2 == 6) {\n        // CP A, n\n        const imm = this.readAddress(this.pc++);\n        const tmp = this.a - imm;\n        this.fc = tmp < 0;\n        this.fh = (this.a & 0xf) - (imm & 0xf) < 0;\n        this.fn = true;\n        this.fz = (tmp & 0xff) == 0;\n      } else if (op1 == 1 && op2 == 3) {\n        cycles += this.decode_cb();\n      } else if (op1 == 0 && op2 == 3) {\n        // JP nn\n        const imm1 = this.readAddress(this.pc++);\n        const imm2 = this.readAddress(this.pc++);\n        this.pc = (imm2 << 8) | imm1;\n      } else if ((op1 & 0x4) == 0 && op2 == 2) {\n        // JP cc, nn\n        const imm1 = this.readAddress(this.pc++);\n        const imm2 = this.readAddress(this.pc++);\n        if (this.readCondition(op1 & 0x3)) {\n          this.pc = (imm2 << 8) | imm1;\n          cycles += 1;\n        }\n      } else if (op1 == 5 && op2 == 1) {\n        // JP HL\n        this.pc = this.hl;\n      } else if (op1 == 1 && op2 == 5) {\n        // CALL nn\n        const imm1 = this.readAddress(this.pc++);\n        const imm2 = this.readAddress(this.pc++);\n        this.writeAddress(--this.sp, this.pch);\n        this.writeAddress(--this.sp, this.pcl);\n        this.pc = (imm2 << 8) | imm1;\n      } else if ((op1 & 0x4) == 0 && op2 == 4) {\n        // CALL cc, nn\n        const imm1 = this.readAddress(this.pc++);\n        const imm2 = this.readAddress(this.pc++);\n        if (this.readCondition(op1 & 0x3)) {\n          this.writeAddress(--this.sp, this.pch);\n          this.writeAddress(--this.sp, this.pcl);\n          this.pc = (imm2 << 8) | imm1;\n          cycles += 3;\n        }\n      } else if (op1 == 1 && op2 == 1) {\n        // RET\n        this.pc = this.readAddress(this.sp++);\n        this.pc |= this.readAddress(this.sp++) << 8;\n      } else if (op1 == 3 && op2 == 1) {\n        // RETI\n        this.pc = this.readAddress(this.sp++);\n        this.pc |= this.readAddress(this.sp++) << 8;\n        this.ime = true;\n      } else if ((op1 & 0x4) == 0 && op2 == 0) {\n        // RET cc\n        if (this.readCondition(op1 & 0x3)) {\n          this.pc = this.readAddress(this.sp++);\n          this.pc |= this.readAddress(this.sp++) << 8;\n          cycles += 3;\n        }\n      } else if (op2 == 7) {\n        // RST t\n        this.writeAddress(--this.sp, this.pch);\n        this.writeAddress(--this.sp, this.pcl);\n        this.pc = op1 << 3;\n      } else if (op1 == 6 && op2 == 3) {\n        // DI\n        this.ime = false;\n      } else if (op1 == 7 && op2 == 3) {\n        // EI\n        this.ime = true;\n      } else {\n        throw 'unknown instruction: 0x' + instr.toString(16);\n      }\n    }\n    return cycles;\n  }\n\n  decode_cb() {\n    const instr = this.readAddress(this.pc++);\n    let cycles = GameBoy.cbInstrCycles[instr];\n    const quad = instr >> 6, op1 = (instr & 0x3f) >> 3, op2 = instr & 0x7;\n    if (quad == 0) {\n      const r = this.readRegister(op2);\n      if (op1 == 0) {\n        // RLC r\n        const carry = r & 0x80;\n        const tmp = ((r << 1) | (carry >> 7)) & 0xff;\n        this.writeRegister(op2, tmp);\n        this.fc = carry != 0;\n        this.fh = 0;\n        this.fn = 0;\n        this.fz = tmp == 0;\n      } else if (op1 == 1) {\n        // RRC r\n        const carry = r & 0x1;\n        const tmp = ((carry << 7) | (r >> 1)) & 0xff;\n        this.writeRegister(op2, tmp);\n        this.fc = carry != 0;\n        this.fh = 0;\n        this.fn = 0;\n        this.fz = tmp == 0;\n      } else if (op1 == 2) {\n        // RL r\n        const carry = r & 0x80;\n        const tmp = ((r << 1) | this.fc) & 0xff;\n        this.writeRegister(op2, tmp);\n        this.fc = carry != 0;\n        this.fh = 0;\n        this.fn = 0;\n        this.fz = tmp == 0;\n      } else if (op1 == 3) {\n        // RR r\n        const carry = r & 0x1;\n        const tmp = ((this.fc << 7) | (r >> 1)) & 0xff;\n        this.writeRegister(op2, tmp);\n        this.fc = carry != 0;\n        this.fh = 0;\n        this.fn = 0;\n        this.fz = tmp == 0;\n      } else if (op1 == 4) {\n        // SLA r\n        const carry = r & 0x80;\n        const tmp = (r << 1) & 0xff;\n        this.writeRegister(op2, tmp);\n        this.fc = carry != 0;\n        this.fh = 0;\n        this.fn = 0;\n        this.fz = tmp == 0;\n      } else if (op1 == 5) {\n        // SRA r\n        const carry = r & 0x1;\n        const tmp = ((r & 0x80) | (r >> 1)) & 0xff;\n        this.writeRegister(op2, tmp);\n        this.fc = carry != 0;\n        this.fh = 0;\n        this.fn = 0;\n        this.fz = tmp == 0;\n      } else if (op1 == 6) {\n        // SWAP r\n        const tmp = ((r << 4) | (r >> 4)) & 0xff;\n        this.writeRegister(op2, tmp);\n        this.fc = 0;\n        this.fh = 0;\n        this.fn = 0;\n        this.fz = tmp == 0;\n      } else if (op1 == 7) {\n        // SRL r\n        const carry = r & 0x1;\n        const tmp = (r >> 1) & 0xff;\n        this.writeRegister(op2, tmp);\n        this.fc = carry != 0;\n        this.fh = 0;\n        this.fn = 0;\n        this.fz = tmp == 0;\n      }\n    } else if (quad == 1) {\n      // BIT b, r\n      this.fh = true;\n      this.fn = false;\n      this.fz = (this.readRegister(op2) & (1 << op1)) == 0;\n    } else if (quad == 2) {\n      // RES b, r\n      this.writeRegister(op2, this.readRegister(op2) & ~(1 << op1))\n    } else if (quad == 3) {\n      // SET b, r\n      this.writeRegister(op2, this.readRegister(op2) | (1 << op1))\n    }\n    return cycles;\n  }\n}\n\nGameBoy.frequency = (4194304 / 4);//1048576;\nGameBoy.instrCycles = [\n  1, 3, 2, 2, 1, 1, 2, 1, 5, 2, 2, 2, 1, 1, 2, 1,\n  0, 3, 2, 2, 1, 1, 2, 1, 3, 2, 2, 2, 1, 1, 2, 1,\n  2, 3, 2, 2, 1, 1, 2, 1, 2, 2, 2, 2, 1, 1, 2, 1,\n  2, 3, 2, 2, 3, 3, 3, 1, 2, 2, 2, 2, 1, 1, 2, 1,\n  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,\n  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,\n  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,\n  2, 2, 2, 2, 2, 2, 0, 2, 1, 1, 1, 1, 1, 1, 2, 1,\n  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,\n  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,\n  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,\n  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,\n  2, 3, 3, 4, 3, 4, 2, 4, 2, 4, 3, 0, 3, 6, 2, 4,\n  2, 3, 3, 0, 3, 4, 2, 4, 2, 4, 3, 0, 3, 0, 2, 4,\n  3, 3, 2, 0, 0, 4, 2, 4, 4, 1, 4, 0, 0, 0, 2, 4,\n  3, 3, 2, 1, 0, 4, 2, 4, 3, 2, 4, 1, 0, 0, 2, 4,\n];\nGameBoy.cbInstrCycles = [\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 3, 2,\n  2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 3, 2,\n  2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 3, 2,\n  2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 3, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,\n];\nGameBoy.joypadInterrupt = 0x10;\nGameBoy.serialInterrupt = 0x8;\nGameBoy.timerInterrupt = 0x4;\nGameBoy.statInterrupt = 0x2;\nGameBoy.vblankInterrupt = 0x1;\nGameBoy.interrupts = 0x1f;\n\nGameBoy.startTime = 0;\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/js/gb/cpu.js?");
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   GameBoy: () => (/* binding */ GameBoy)
+/* harmony export */ });
+/* harmony import */ var _cartridge_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./cartridge.js */ "./public/js/gb/cartridge.js");
+/* harmony import */ var _display_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./display.js */ "./public/js/gb/display.js");
+/* harmony import */ var _joypad_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./joypad.js */ "./public/js/gb/joypad.js");
+/* harmony import */ var _serial_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./serial.js */ "./public/js/gb/serial.js");
+/* harmony import */ var _sound_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./sound.js */ "./public/js/gb/sound.js");
+/* harmony import */ var _timer_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./timer.js */ "./public/js/gb/timer.js");
+/* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ../../dummylogger.js */ "./public/dummylogger.js");
+ // Adjust the import based on the actual exports
+
+
+
+
+
+ // Adjust based on actual exports
+
+class GameBoy {
+  constructor(flagSharedBuffer, sbSharedBuffer, scSharedBuffer,
+      transferTriggerSharedBuffer,
+      useInternalClockSharedBuffer,
+      sharedBuffer,
+      timingBuffer,
+      waitScBuffer,
+      keySharedBuffer,
+      scDirtySharedBuffer,
+      scMonitorStartSharedBuffer,
+      soundLeftSab,
+      soundRightSab,
+      fillSab,
+      bufferLen) {
+    this.display = new _display_js__WEBPACK_IMPORTED_MODULE_1__.Display(this);
+    this.timer = new _timer_js__WEBPACK_IMPORTED_MODULE_5__.Timer(this);
+    this.joypad = new _joypad_js__WEBPACK_IMPORTED_MODULE_2__.Joypad(this, keySharedBuffer);
+    this.cartridge = new _cartridge_js__WEBPACK_IMPORTED_MODULE_0__.Cartridge(this);
+    this.sound = new _sound_js__WEBPACK_IMPORTED_MODULE_4__.Sound(this, soundLeftSab, soundRightSab, fillSab, bufferLen);
+    this.serial = new _serial_js__WEBPACK_IMPORTED_MODULE_3__.Serial(this, sbSharedBuffer, scSharedBuffer,
+        transferTriggerSharedBuffer,
+        useInternalClockSharedBuffer, sharedBuffer);
+
+    this.a = 0;
+    this.fz = false;
+    this.fn = false;
+    this.fh = false;
+    this.fc = false;
+    this.b = 0;
+    this.c = 0;
+    this.d = 0;
+    this.e = 0;
+    this.h = 0;
+    this.l = 0;
+    this._pc = 0x0100;
+    this._sp = 0xfffe;
+
+    this.ime = false;
+
+    this.halt = false;
+
+    //this._if = 0;
+    this._if = new Int32Array(flagSharedBuffer);
+
+    this._ie = 0;
+
+    this._svbk = 0;
+
+    this.doubleSpeed = false;
+    this.speedTrigger = false;
+
+    this.irReadEnable = 0;
+    this.irOn = false;
+
+    this.wram = new Uint8Array(0x8000);
+    this.hram = new Uint8Array(0x7f);
+
+    this.cgb = false;
+    this.cycles = 0;
+
+    this._waitForIO = false;
+
+    this._timing = new Int32Array(timingBuffer);
+
+    this._messenger = null;
+
+    this._lock = new Int32Array(sharedBuffer);
+
+    this._waitForSc = new Int32Array(waitScBuffer);
+
+    this._scDirty = new Int32Array(scDirtySharedBuffer);
+
+    this._scMonitor = new Int32Array(scMonitorStartSharedBuffer);
+  }
+
+  get waitForIO() {
+    return this._waitForIO;
+  }
+
+  set waitForIO(value) {
+    this._waitForIO = value;
+  }
+
+  get timing() {
+    return this._timing;
+  }
+
+  get f() {
+    return (this.fz << 7) | (this.fn << 6) | (this.fh << 5) | (this.fc << 4);
+  }
+
+  set f(value) {
+    this.fz = (value & 0x80) != 0;
+    this.fn = (value & 0x40) != 0;
+    this.fh = (value & 0x20) != 0;
+    this.fc = (value & 0x10) != 0;
+  }
+
+  get bc() {
+    return (this.b << 8) | this.c;
+  }
+
+  get de() {
+    return (this.d << 8) | this.e;
+  }
+
+  get hl() {
+    return (this.h << 8) | this.l;
+  }
+
+  get sp() {
+    return this._sp;
+  }
+
+  get sph() {
+    return this._sp >> 8;
+  }
+
+  get spl() {
+    return this._sp & 0xff;
+  }
+
+  get pc() {
+    return this._pc;
+  }
+
+  get pch() {
+    return this._pc >> 8;
+  }
+
+  get pcl() {
+    return this._pc & 0xff;
+  }
+
+  set bc(value) {
+    this.b = (value >> 8) & 0xff;
+    this.c = value & 0xff;
+  }
+
+  set de(value) {
+    this.d = (value >> 8) & 0xff;
+    this.e = value & 0xff;
+  }
+
+  set hl(value) {
+    this.h = (value >> 8) & 0xff;
+    this.l = value & 0xff;
+  }
+
+  set sp(value) {
+    this._sp = value & 0xffff;
+  }
+
+  set pc(value) {
+    this._pc = value & 0xffff;
+  }
+
+  get svbk() {
+    if (!this.cgb) {
+      return 0xff;
+    }
+    return 0xf8 | this._svbk;
+  }
+
+  set svbk(value) {
+    if (!this.cgb) {
+      return;
+    }
+    this._svbk = value & 0x7;
+  }
+
+  get key1() {
+    if (!this.cgb) {
+      return 0xff;
+    }
+    return 0x7e | (this.doubleSpeed << 7) | this.speedTrigger;
+  }
+
+  set key1(value) {
+    if (!this.cgb) {
+      return;
+    }
+    this.speedTrigger = (value & 0x1) != 0;
+  }
+
+  get rp() {
+    if (!this.cgb) {
+      return 0xff;
+    }
+    return 0x3c | (this.irReadEnable << 6) | (!(this.irReadEnable && this.irOn)
+        << 1) | this.irOn;
+  }
+
+  set rp(value) {
+    if (!this.cgb) {
+      return;
+    }
+    this.irReadEnable = (value & 0xc0) >> 6;
+    this.irOn = (value & 0x1) != 0;
+  }
+
+  get if() {
+    return 0xe0 | this._if[0];
+  }
+
+  set if(value) {
+    //this._if[0] = value & GameBoy.interrupts;
+    Atomics.store(this._if, 0, value & GameBoy.interrupts);
+  }
+
+  get ie() {
+    return this._ie;
+  }
+
+  set ie(value) {
+    this._ie = value & GameBoy.interrupts;
+  }
+
+  setMessenger(messenger) {
+    this._messenger = messenger;
+    this.serial.messenger = messenger;
+    this.sound.messenger = messenger;
+  }
+
+  requestInterrupt(interrupt) {
+    //this._if[0] |= interrupt;
+    Atomics.or(this._if, 0, interrupt);
+  }
+
+  clearInterrupt(interrupt) {
+    //this._if[0] &= ~interrupt;
+    Atomics.and(this._if, 0, ~interrupt);
+  }
+
+  callInterrupt(address) {
+    this.writeAddress(--this.sp, this.pch);
+    this.writeAddress(--this.sp, this.pcl);
+    this.pc = address;
+  }
+
+  readWRAM(address) {
+    switch (address >> 12) {
+      case 0:
+        return this.wram[address];
+      case 1:
+        return this.wram[((this._svbk == 0 ? 1 : this._svbk) << 12) | (address
+            & 0xfff)];
+    }
+  }
+
+  writeWRAM(address, value) {
+    switch (address >> 12) {
+      case 0:
+        this.wram[address] = value;
+        break;
+      case 1:
+        this.wram[((this._svbk == 0 ? 1 : this._svbk) << 12) | (address
+            & 0xfff)] = value;
+        break;
+    }
+  }
+
+  readAddress(address) {
+    switch (address >> 13) {
+      case 0x0:
+      case 0x1:
+      case 0x2:
+      case 0x3:
+        return this.cartridge.readROM(address & 0x7fff);
+      case 0x4:
+        return this.display.readVRAM(address & 0x1fff);
+      case 0x5:
+        return this.cartridge.readRAM(address & 0x1fff);
+      case 0x6:
+        return this.readWRAM(address & 0x1fff);
+      case 0x7:
+        if (address <= 0xfdff) {
+          return this.readWRAM(address & 0x1fff);
+        } else if (address <= 0xfe9f) {
+          return this.display.oam[address & 0xff];
+        } else if (address <= 0xfeff) {
+          return 0xff;
+        } else if (address <= 0xff7f) {
+          if (address >= 0xff10 && address <= 0xff3f) {
+            return this.sound.readAddress(address & 0xff);
+          } else {
+            switch (address & 0xff) {
+              case 0x00:
+                return this.joypad.p1;
+              case 0x01:
+                //customLog("[get sb by cpu] ");
+                return this.serial.sb;
+              case 0x02:
+                //customLog("[get sc by cpu] ");
+                return this.serial.sc;
+              case 0x04:
+                return this.timer.div;
+              case 0x05:
+                return this.timer.tima;
+              case 0x06:
+                return this.timer.tma;
+              case 0x07:
+                return this.timer.tac;
+              case 0x0f:
+                return this.if;
+              case 0x40:
+                return this.display.lcdc;
+              case 0x41:
+                return this.display.stat;
+              case 0x42:
+                return this.display.scy;
+              case 0x43:
+                return this.display.scx;
+              case 0x44:
+                return this.display.ly;
+              case 0x45:
+                return this.display.lyc;
+              case 0x47:
+                return this.display.bgp;
+              case 0x48:
+                return this.display.obp0;
+              case 0x49:
+                return this.display.obp1;
+              case 0x4a:
+                return this.display.wy;
+              case 0x4b:
+                return this.display.wx;
+              case 0x4d:
+                return this.key1;
+              case 0x4f:
+                return this.display.vbk;
+              case 0x55:
+                return this.display.hdma5;
+              case 0x56:
+                return this.rp;
+              case 0x68:
+                return this.display.bcps;
+              case 0x69:
+                return this.display.bcpd;
+              case 0x6a:
+                return this.display.ocps;
+              case 0x6b:
+                return this.display.ocpd;
+              case 0x70:
+                return this.svbk;
+              default:
+                return 0xff;
+            }
+          }
+        } else if (address <= 0xfffe) {
+          return this.hram[address & 0x7f];
+        } else {
+          return this.ie;
+        }
+    }
+  }
+
+  writeAddress(address, value) {
+    switch (address >> 13) {
+      case 0x0:
+      case 0x1:
+      case 0x2:
+      case 0x3:
+        this.cartridge.writeROM(address & 0x7fff, value);
+        break;
+      case 0x4:
+        this.display.writeVRAM(address & 0x1fff, value);
+        break;
+      case 0x5:
+        this.cartridge.writeRAM(address & 0x1fff, value);
+        break;
+      case 0x6:
+        this.writeWRAM(address & 0x1fff, value);
+        break;
+      case 0x7:
+        if (address <= 0xfdff) {
+          this.writeWRAM(address & 0x1fff, value);
+        } else if (address <= 0xfe9f) {
+          this.display.oam[address & 0xff] = value;
+        } else if (address <= 0xfeff) {
+
+        } else if (address <= 0xff7f) {
+          if (address >= 0xff10 && address <= 0xff3f) {
+            this.sound.writeAddress(address & 0xff, value);
+          } else {
+            switch (address & 0xff) {
+              case 0x00:
+                this.joypad.p1 = value;
+                break;
+              case 0x01:
+                //customLog("[set sb by cpu] ");
+                this.serial.sb = value;
+                break;
+              case 0x02:
+                //customLog("[set sc by cpu] ");
+                this.serial.sc = value;
+
+                if ((value | 0x7E) === 0xFE) {
+                  Atomics.store(this._waitForSc, 0, 1);
+                  (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_6__.customLog)("update sc ", value);
+
+                  self.postMessage({msg: 'sc', payload: -1, time:-1});
+                  /*
+                  if(Atomics.load(this._scDirty, 0) === 1) {
+                    //Atomics.store(this._lock, 0, 1);
+                    //Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0
+                  }
+                   */
+                }
+
+                break;
+              case 0x04:
+                this.timer.div = value;
+                break;
+              case 0x05:
+                this.timer.tima = value;
+                break;
+              case 0x06:
+                this.timer.tma = value;
+                break;
+              case 0x07:
+                this.timer.tac = value;
+                break;
+              case 0x0f:
+                this.if = value;
+                break;
+              case 0x40:
+                this.display.lcdc = value;
+                break;
+              case 0x41:
+                this.display.stat = value;
+                break;
+              case 0x42:
+                this.display.scy = value;
+                break;
+              case 0x43:
+                this.display.scx = value;
+                break;
+              case 0x45:
+                this.display.lyc = value;
+                break;
+              case 0x46:
+                this.display.dma = value;
+                break;
+              case 0x47:
+                this.display.bgp = value;
+                break;
+              case 0x48:
+                this.display.obp0 = value;
+                break;
+              case 0x49:
+                this.display.obp1 = value;
+                break;
+              case 0x4a:
+                this.display.wy = value;
+                break;
+              case 0x4b:
+                this.display.wx = value;
+                break;
+              case 0x4d:
+                this.key1 = value;
+                break;
+              case 0x4f:
+                this.display.vbk = value;
+                break;
+              case 0x51:
+                this.display.hdma1 = value;
+                break;
+              case 0x52:
+                this.display.hdma2 = value;
+                break;
+              case 0x53:
+                this.display.hdma3 = value;
+                break;
+              case 0x54:
+                this.display.hdma4 = value;
+                break;
+              case 0x55:
+                this.display.hdma5 = value;
+                break;
+              case 0x56:
+                this.rp = value;
+                break;
+              case 0x68:
+                this.display.bcps = value;
+                break;
+              case 0x69:
+                this.display.bcpd = value;
+                break;
+              case 0x6a:
+                this.display.ocps = value;
+                break;
+              case 0x6b:
+                this.display.ocpd = value;
+                break;
+              case 0x70:
+                this.svbk = value;
+                break;
+              default:
+                break;
+            }
+          }
+        } else if (address <= 0xfffe) {
+          this.hram[address & 0x7f] = value;
+        } else {
+          this.ie = value;
+        }
+        break;
+    }
+  }
+
+  readRegister(register) {
+    switch (register) {
+      case 0:
+        return this.b;
+      case 1:
+        return this.c;
+      case 2:
+        return this.d;
+      case 3:
+        return this.e;
+      case 4:
+        return this.h;
+      case 5:
+        return this.l;
+      case 6:
+        return this.readAddress(this.hl);
+      case 7:
+        return this.a;
+    }
+  }
+
+  writeRegister(register, value) {
+    switch (register) {
+      case 0:
+        this.b = value;
+        break;
+      case 1:
+        this.c = value;
+        break;
+      case 2:
+        this.d = value;
+        break;
+      case 3:
+        this.e = value;
+        break;
+      case 4:
+        this.h = value;
+        break;
+      case 5:
+        this.l = value;
+        break;
+      case 6:
+        this.writeAddress(this.hl, value);
+        break;
+      case 7:
+        this.a = value;
+        break;
+    }
+  }
+
+  readDoubleRegisterIndirect(register) {
+    switch (register) {
+      case 0:
+        return this.readAddress(this.bc);
+      case 1:
+        return this.readAddress(this.de);
+      case 2:
+        return this.readAddress(this.hl++);
+      case 3:
+        return this.readAddress(this.hl--);
+    }
+  }
+
+  writeDoubleRegisterIndirect(register, value) {
+    switch (register) {
+      case 0:
+        this.writeAddress(this.bc, value);
+        break;
+      case 1:
+        this.writeAddress(this.de, value);
+        break;
+      case 2:
+        this.writeAddress(this.hl++, value);
+        break;
+      case 3:
+        this.writeAddress(this.hl--, value);
+        break;
+    }
+  }
+
+  readDoubleRegister(register) {
+    switch (register) {
+      case 0:
+        return this.bc;
+      case 1:
+        return this.de;
+      case 2:
+        return this.hl;
+      case 3:
+        return this.sp;
+    }
+  }
+
+  writeDoubleRegister(register, value) {
+    switch (register) {
+      case 0:
+        this.bc = value;
+        break;
+      case 1:
+        this.de = value;
+        break;
+      case 2:
+        this.hl = value;
+        break;
+      case 3:
+        this.sp = value;
+        break;
+    }
+  }
+
+  popDoubleRegister(register) {
+    switch (register) {
+      case 0:
+        this.c = this.readAddress(this.sp++);
+        this.b = this.readAddress(this.sp++);
+        break;
+      case 1:
+        this.e = this.readAddress(this.sp++);
+        this.d = this.readAddress(this.sp++);
+        break;
+      case 2:
+        this.l = this.readAddress(this.sp++);
+        this.h = this.readAddress(this.sp++);
+        break;
+      case 3:
+        this.f = this.readAddress(this.sp++);
+        this.a = this.readAddress(this.sp++);
+        break;
+    }
+  }
+
+  pushDoubleRegister(register) {
+    switch (register) {
+      case 0:
+        this.writeAddress(--this.sp, this.b);
+        this.writeAddress(--this.sp, this.c);
+        break;
+      case 1:
+        this.writeAddress(--this.sp, this.d);
+        this.writeAddress(--this.sp, this.e);
+        break;
+      case 2:
+        this.writeAddress(--this.sp, this.h);
+        this.writeAddress(--this.sp, this.l);
+        break;
+      case 3:
+        this.writeAddress(--this.sp, this.a);
+        this.writeAddress(--this.sp, this.f);
+        break;
+    }
+  }
+
+  readCondition(condition) {
+    switch (condition) {
+      case 0:
+        return !this.fz;
+      case 1:
+        return this.fz;
+      case 2:
+        return !this.fc;
+      case 3:
+        return this.fc;
+    }
+  }
+
+  runHdma() {
+    this.writeAddress(0x8000 | this.display.hdmaDst++,
+        this.readAddress(this.display.hdmaSrc++));
+    if ((this.display.hdmaDst & 0xf) == 0) {
+      this.display.hdmaCounter--;
+      if (this.display.hdmaCounter == 0) {
+        this.display.hdmaOn = false;
+        this.display.hblankHdmaOn = false;
+        this.display.hdmaTrigger = false;
+      }
+      if (this.display.hblankHdmaOn) {
+        this.display.hdmaOn = false;
+      }
+    }
+  }
+
+  cycle() {
+
+    Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0
+
+    //Atomics.add(this._timing, 0, 1);
+
+    let cycles = 0;
+    if ((this.ime || this.halt) && (this.ie & this.if) != 0) {
+      this.halt = false;
+      if (this.ime) {
+        this.ime = false;
+        if ((this.ie & this.if & GameBoy.vblankInterrupt) != 0) {
+          this.clearInterrupt(GameBoy.vblankInterrupt);
+          this.callInterrupt(0x0040);
+        } else if ((this.ie & this.if & GameBoy.statInterrupt) != 0) {
+          this.clearInterrupt(GameBoy.statInterrupt);
+          this.callInterrupt(0x0048);
+        } else if ((this.ie & this.if & GameBoy.timerInterrupt) != 0) {
+          this.clearInterrupt(GameBoy.timerInterrupt);
+          this.callInterrupt(0x0050);
+        } else if ((this.ie & this.if & GameBoy.serialInterrupt) != 0) {
+          this.clearInterrupt(GameBoy.serialInterrupt);
+          this.callInterrupt(0x0058);
+        } else if ((this.ie & this.if & GameBoy.joypadInterrupt) != 0) {
+          this.clearInterrupt(GameBoy.joypadInterrupt);
+          this.callInterrupt(0x0060);
+        }
+        cycles += 5;
+      }
+    } else {
+      cycles += (this.halt || this.display.hdmaOn) ? 1 : this.decode();
+    }
+
+    let hardwareCycles = cycles;
+    while (hardwareCycles > 0) {
+      this.timer.cycle();
+      this.serial.cycle();
+      hardwareCycles--;
+    }
+
+    this.cycles += cycles / (this.doubleSpeed ? 2 : 1);
+    while (this.cycles > 0) {
+      if (this.display.hdmaOn) {
+        this.runHdma();
+      }
+      this.display.cycle();
+      this.sound.cycle();
+      this.cycles--;
+    }
+
+    if (this.display.hdmaTrigger) {
+      this.display.hdmaTrigger = false;
+      this.display.hdmaOn = true;
+    }
+
+    return cycles / (this.doubleSpeed ? 2 : 1);
+  }
+
+  decode() {
+    const instr = this.readAddress(this.pc++);
+    let cycles = GameBoy.instrCycles[instr];
+    const quad = instr >> 6, op1 = (instr & 0x3f) >> 3, op2 = instr & 0x7;
+    if (quad === 0) {
+      if (op2 == 6) {
+        // LD r, n
+        const imm = this.readAddress(this.pc++);
+        this.writeRegister(op1, imm);
+      } else if (op2 == 2) {
+        if ((op1 & 0x1) != 0) {
+          // LD A, (rr)
+          this.a = this.readDoubleRegisterIndirect(op1 >> 1);
+        } else {
+          // LD (rr), A
+          this.writeDoubleRegisterIndirect(op1 >> 1, this.a);
+        }
+      } else if ((op1 & 0x1) == 0 && op2 == 1) {
+        // LD dd, nn
+        const imm1 = this.readAddress(this.pc++);
+        const imm2 = this.readAddress(this.pc++);
+        this.writeDoubleRegister(op1 >> 1, (imm2 << 8) | imm1);
+      } else if (op1 == 1 && op2 == 0) {
+        // LD (nn), SP
+        const imm1 = this.readAddress(this.pc++);
+        const imm2 = this.readAddress(this.pc++);
+        let address = (imm2 << 8) | imm1;
+        this.writeAddress(address++, this.spl);
+        this.writeAddress(address++, this.sph);
+      } else if (op2 == 4) {
+        // INC r
+        const tmp = (this.readRegister(op1) + 1) & 0xff;
+        this.writeRegister(op1, tmp);
+        this.fh = (tmp & 0xf) == 0;
+        this.fn = false;
+        this.fz = tmp == 0;
+      } else if (op2 == 5) {
+        // DEC r
+        const tmp = (this.readRegister(op1) - 1) & 0xff;
+        this.writeRegister(op1, tmp);
+        this.fh = (tmp & 0xf) == 0xf;
+        this.fn = true;
+        this.fz = tmp == 0;
+      } else if ((op1 & 0x1) != 0 && op2 == 1) {
+        // ADD HL, ss
+        const ss = this.readDoubleRegister(op1 >> 1);
+        this.fc = this.hl + ss > 0xffff;
+        this.fh = (this.hl & 0xfff) + (ss & 0xfff) > 0xfff;
+        this.fn = false;
+        this.hl += ss;
+      } else if ((op1 & 0x1) == 0 && op2 == 3) {
+        // INC ss
+        this.writeDoubleRegister(op1 >> 1,
+            this.readDoubleRegister(op1 >> 1) + 1);
+      } else if ((op1 & 0x1) != 0 && op2 == 3) {
+        // DEC ss
+        this.writeDoubleRegister(op1 >> 1,
+            this.readDoubleRegister(op1 >> 1) - 1);
+      } else if (op1 == 0 && op2 == 7) {
+        // RLCA
+        const carry = this.a & 0x80;
+        this.a = ((this.a << 1) | (carry >> 7)) & 0xff;
+        this.fc = carry != 0;
+        this.fh = false;
+        this.fn = false;
+        this.fz = false;
+      } else if (op1 == 1 && op2 == 7) {
+        // RRCA
+        const carry = this.a & 0x1;
+        this.a = ((carry << 7) | (this.a >> 1)) & 0xff;
+        this.fc = carry != 0;
+        this.fh = false;
+        this.fn = false;
+        this.fz = false;
+      } else if (op1 == 2 && op2 == 7) {
+        // RLA
+        const carry = this.a & 0x80;
+        this.a = ((this.a << 1) | this.fc) & 0xff;
+        this.fc = carry != 0;
+        this.fh = false;
+        this.fn = false;
+        this.fz = false;
+      } else if (op1 == 3 && op2 == 7) {
+        // RRA
+        const carry = this.a & 0x1;
+        this.a = ((this.fc << 7) | (this.a >> 1)) & 0xff;
+        this.fc = carry != 0;
+        this.fh = false;
+        this.fn = false;
+        this.fz = false;
+      } else if (op1 == 3 && op2 == 0) {
+        // JR e
+        const offset = this.readAddress(this.pc++) << 24 >> 24;
+        this.pc += offset;
+      } else if ((op1 & 0x4) != 0 && op2 == 0) {
+        // JR cc, e
+        const offset = this.readAddress(this.pc++) << 24 >> 24;
+        if (this.readCondition(op1 & 0x3)) {
+          this.pc += offset;
+          cycles += 1;
+        }
+      } else if (op1 == 4 && op2 == 7) {
+        // DAA
+        let tmp = this.a;
+        if (!this.fn) {
+          if (this.fc || tmp > 0x99) {
+            tmp += 0x60;
+            this.fc = true;
+          }
+          if (this.fh || (tmp & 0xf) > 0x9) {
+            tmp += 0x06;
+          }
+        } else {
+          if (this.fc) {
+            tmp -= 0x60;
+          }
+          if (this.fh) {
+            tmp -= 0x6;
+          }
+        }
+        this.fh = false;
+        this.fz = (tmp & 0xff) == 0;
+        this.a = tmp & 0xff;
+      } else if (op1 == 5 && op2 == 7) {
+        // CPL
+        this.a ^= 0xff;
+        this.fh = true;
+        this.fn = true;
+      } else if (op1 == 0 && op2 == 0) {
+        // NOP
+      } else if (op1 == 6 && op2 == 7) {
+        // SCF
+        this.fc = true;
+        this.fh = false;
+        this.fn = false;
+      } else if (op1 == 7 && op2 == 7) {
+        // CCF
+        this.fc = !this.fc;
+        this.fh = false;
+        this.fn = false;
+      } else if (op1 == 2 && op2 == 0) {
+        // STOP
+        this.pc++;
+        if (this.speedTrigger) {
+          this.speedTrigger = false;
+          this.doubleSpeed = !this.doubleSpeed;
+        }
+      }
+    } else if (quad === 1) {
+      if (op1 != 6 || op2 != 6) {
+        // LD r, r'
+        this.writeRegister(op1, this.readRegister(op2));
+      } else {
+        // HALT
+        this.halt = true;
+      }
+    } else if (quad === 2) {
+      const r = this.readRegister(op2);
+      if (op1 == 0) {
+        // ADD A, r
+        const tmp = this.a + r;
+        this.fc = tmp > 0xff;
+        this.fh = (this.a & 0xf) + (r & 0xf) > 0xf;
+        this.fn = false;
+        this.fz = (tmp & 0xff) == 0;
+        this.a = tmp & 0xff;
+      } else if (op1 == 1) {
+        // ADC A, r
+        const carry = this.fc;
+        const tmp = this.a + r + carry;
+        this.fc = tmp > 0xff;
+        this.fh = (this.a & 0xf) + (r & 0xf) + carry > 0xf;
+        this.fn = false;
+        this.fz = (tmp & 0xff) == 0;
+        this.a = tmp & 0xff;
+      } else if (op1 == 2) {
+        // SUB A, r
+        const tmp = this.a - r;
+        this.fc = tmp < 0;
+        this.fh = (this.a & 0xf) - (r & 0xf) < 0;
+        this.fn = true;
+        this.fz = (tmp & 0xff) == 0;
+        this.a = tmp & 0xff;
+      } else if (op1 == 3) {
+        // SBC A, r
+        const carry = this.fc
+        const tmp = this.a - r - carry;
+        this.fc = tmp < 0;
+        this.fh = (this.a & 0xf) - (r & 0xf) - carry < 0;
+        this.fn = true;
+        this.fz = (tmp & 0xff) == 0;
+        this.a = tmp & 0xff;
+      } else if (op1 == 4) {
+        // AND A, r
+        const tmp = this.a & r;
+        this.fc = false;
+        this.fh = true;
+        this.fn = false;
+        this.fz = tmp == 0;
+        this.a = tmp;
+      } else if (op1 == 5) {
+        // XOR A, r
+        const tmp = this.a ^ r;
+        this.fc = false;
+        this.fh = false;
+        this.fn = false;
+        this.fz = tmp == 0;
+        this.a = tmp;
+      } else if (op1 == 6) {
+        // OR A, r
+        const tmp = this.a | r;
+        this.a |= r;
+        this.fc = false;
+        this.fh = false;
+        this.fn = false;
+        this.fz = tmp == 0;
+        this.a = tmp;
+      } else if (op1 == 7) {
+        // CP A, r
+        const tmp = this.a - r;
+        this.fc = tmp < 0;
+        this.fh = (this.a & 0xf) - (r & 0xf) < 0;
+        this.fn = true;
+        this.fz = (tmp & 0xff) == 0;
+      }
+    } else if (quad === 3) {
+      if (op1 == 6 && op2 == 2) {
+        // LD A, (C)
+        this.a = this.readAddress(0xff00 | this.c);
+      } else if (op1 == 4 && op2 == 2) {
+        // LD (C), A
+        this.writeAddress(0xff00 | this.c, this.a);
+      } else if (op1 == 6 && op2 == 0) {
+        // LD A, (n)
+        const imm = this.readAddress(this.pc++);
+        this.a = this.readAddress(0xff00 | imm);
+      } else if (op1 == 4 && op2 == 0) {
+        // LD (n), A
+        const imm = this.readAddress(this.pc++);
+        this.writeAddress(0xff00 | imm, this.a);
+      } else if (op1 == 7 && op2 == 2) {
+        // LD A, (nn)
+        const imm1 = this.readAddress(this.pc++);
+        const imm2 = this.readAddress(this.pc++);
+        this.a = this.readAddress((imm2 << 8) | imm1);
+      } else if (op1 == 5 && op2 == 2) {
+        // LD (nn), A
+        const imm1 = this.readAddress(this.pc++);
+        const imm2 = this.readAddress(this.pc++);
+        this.writeAddress((imm2 << 8) | imm1, this.a);
+      } else if (op1 == 7 && op2 == 1) {
+        // LD SP, HL
+        this.sp = this.hl;
+      } else if ((op1 & 0x1) == 0 && op2 == 5) {
+        // PUSH qq
+        this.pushDoubleRegister(op1 >> 1);
+      } else if ((op1 & 0x1) == 0 && op2 == 1) {
+        // POP qq
+        this.popDoubleRegister(op1 >> 1);
+      } else if (op1 == 7 && op2 == 0) {
+        // LDHL SP, e
+        const offset = this.readAddress(this.pc++) << 24 >> 24;
+        const tmp = this.sp + offset;
+        this.fc = (this.sp & 0xff) + (offset & 0xff) > 0xff;
+        this.fh = (this.sp & 0xf) + (offset & 0xf) > 0xf;
+        this.fn = false;
+        this.fz = false;
+        this.hl = tmp;
+      } else if (op1 == 5 && op2 == 0) {
+        // ADD SP, e
+        const offset = this.readAddress(this.pc++) << 24 >> 24;
+        const tmp = this.sp + offset;
+        this.fc = (this.sp & 0xff) + (offset & 0xff) > 0xff;
+        this.fh = (this.sp & 0xf) + (offset & 0xf) > 0xf;
+        this.fn = false;
+        this.fz = false;
+        this.sp = tmp;
+      } else if (op1 == 0 && op2 == 6) {
+        // ADD A, n
+        const imm = this.readAddress(this.pc++);
+        const tmp = this.a + imm
+        this.fc = tmp > 0xff;
+        this.fh = (this.a & 0xf) + (imm & 0xf) > 0xf;
+        this.fn = false;
+        this.fz = (tmp & 0xff) == 0;
+        this.a = tmp & 0xff;
+      } else if (op1 == 1 && op2 == 6) {
+        // ADC A, n
+        const imm = this.readAddress(this.pc++);
+        const carry = this.fc;
+        const tmp = this.a + imm + carry
+        this.fc = tmp > 0xff;
+        this.fh = (this.a & 0xf) + (imm & 0xf) + carry > 0xf;
+        this.fn = false;
+        this.fz = (tmp & 0xff) == 0;
+        this.a = tmp & 0xff;
+      } else if (op1 == 2 && op2 == 6) {
+        // SUB A, n
+        const imm = this.readAddress(this.pc++);
+        const tmp = this.a - imm;
+        this.fc = tmp < 0;
+        this.fh = (this.a & 0xf) - (imm & 0xf) < 0;
+        this.fn = true;
+        this.fz = (tmp & 0xff) == 0;
+        this.a = tmp & 0xff;
+      } else if (op1 == 3 && op2 == 6) {
+        // SBC A, n
+        const imm = this.readAddress(this.pc++);
+        const carry = this.fc;
+        const tmp = this.a - imm - carry;
+        this.fc = tmp < 0;
+        this.fh = (this.a & 0xf) - (imm & 0xf) - carry < 0;
+        this.fn = true;
+        this.fz = (tmp & 0xff) == 0;
+        this.a = tmp & 0xff;
+      } else if (op1 == 4 && op2 == 6) {
+        // AND A, n
+        const imm = this.readAddress(this.pc++);
+        const tmp = this.a & imm;
+        this.fc = false;
+        this.fh = true;
+        this.fn = false;
+        this.fz = tmp == 0;
+        this.a = tmp;
+      } else if (op1 == 5 && op2 == 6) {
+        // XOR A, n
+        const imm = this.readAddress(this.pc++);
+        const tmp = this.a ^ imm;
+        this.fc = false;
+        this.fh = false;
+        this.fn = false;
+        this.fz = tmp == 0;
+        this.a = tmp;
+      } else if (op1 == 6 && op2 == 6) {
+        // OR A, n
+        const imm = this.readAddress(this.pc++);
+        const tmp = this.a | imm;
+        this.fc = false;
+        this.fh = false;
+        this.fn = false;
+        this.fz = tmp == 0;
+        this.a = tmp;
+      } else if (op1 == 7 && op2 == 6) {
+        // CP A, n
+        const imm = this.readAddress(this.pc++);
+        const tmp = this.a - imm;
+        this.fc = tmp < 0;
+        this.fh = (this.a & 0xf) - (imm & 0xf) < 0;
+        this.fn = true;
+        this.fz = (tmp & 0xff) == 0;
+      } else if (op1 == 1 && op2 == 3) {
+        cycles += this.decode_cb();
+      } else if (op1 == 0 && op2 == 3) {
+        // JP nn
+        const imm1 = this.readAddress(this.pc++);
+        const imm2 = this.readAddress(this.pc++);
+        this.pc = (imm2 << 8) | imm1;
+      } else if ((op1 & 0x4) == 0 && op2 == 2) {
+        // JP cc, nn
+        const imm1 = this.readAddress(this.pc++);
+        const imm2 = this.readAddress(this.pc++);
+        if (this.readCondition(op1 & 0x3)) {
+          this.pc = (imm2 << 8) | imm1;
+          cycles += 1;
+        }
+      } else if (op1 == 5 && op2 == 1) {
+        // JP HL
+        this.pc = this.hl;
+      } else if (op1 == 1 && op2 == 5) {
+        // CALL nn
+        const imm1 = this.readAddress(this.pc++);
+        const imm2 = this.readAddress(this.pc++);
+        this.writeAddress(--this.sp, this.pch);
+        this.writeAddress(--this.sp, this.pcl);
+        this.pc = (imm2 << 8) | imm1;
+      } else if ((op1 & 0x4) == 0 && op2 == 4) {
+        // CALL cc, nn
+        const imm1 = this.readAddress(this.pc++);
+        const imm2 = this.readAddress(this.pc++);
+        if (this.readCondition(op1 & 0x3)) {
+          this.writeAddress(--this.sp, this.pch);
+          this.writeAddress(--this.sp, this.pcl);
+          this.pc = (imm2 << 8) | imm1;
+          cycles += 3;
+        }
+      } else if (op1 == 1 && op2 == 1) {
+        // RET
+        this.pc = this.readAddress(this.sp++);
+        this.pc |= this.readAddress(this.sp++) << 8;
+      } else if (op1 == 3 && op2 == 1) {
+        // RETI
+        this.pc = this.readAddress(this.sp++);
+        this.pc |= this.readAddress(this.sp++) << 8;
+        this.ime = true;
+      } else if ((op1 & 0x4) == 0 && op2 == 0) {
+        // RET cc
+        if (this.readCondition(op1 & 0x3)) {
+          this.pc = this.readAddress(this.sp++);
+          this.pc |= this.readAddress(this.sp++) << 8;
+          cycles += 3;
+        }
+      } else if (op2 == 7) {
+        // RST t
+        this.writeAddress(--this.sp, this.pch);
+        this.writeAddress(--this.sp, this.pcl);
+        this.pc = op1 << 3;
+      } else if (op1 == 6 && op2 == 3) {
+        // DI
+        this.ime = false;
+      } else if (op1 == 7 && op2 == 3) {
+        // EI
+        this.ime = true;
+      } else {
+        throw 'unknown instruction: 0x' + instr.toString(16);
+      }
+    }
+    return cycles;
+  }
+
+  decode_cb() {
+    const instr = this.readAddress(this.pc++);
+    let cycles = GameBoy.cbInstrCycles[instr];
+    const quad = instr >> 6, op1 = (instr & 0x3f) >> 3, op2 = instr & 0x7;
+    if (quad == 0) {
+      const r = this.readRegister(op2);
+      if (op1 == 0) {
+        // RLC r
+        const carry = r & 0x80;
+        const tmp = ((r << 1) | (carry >> 7)) & 0xff;
+        this.writeRegister(op2, tmp);
+        this.fc = carry != 0;
+        this.fh = 0;
+        this.fn = 0;
+        this.fz = tmp == 0;
+      } else if (op1 == 1) {
+        // RRC r
+        const carry = r & 0x1;
+        const tmp = ((carry << 7) | (r >> 1)) & 0xff;
+        this.writeRegister(op2, tmp);
+        this.fc = carry != 0;
+        this.fh = 0;
+        this.fn = 0;
+        this.fz = tmp == 0;
+      } else if (op1 == 2) {
+        // RL r
+        const carry = r & 0x80;
+        const tmp = ((r << 1) | this.fc) & 0xff;
+        this.writeRegister(op2, tmp);
+        this.fc = carry != 0;
+        this.fh = 0;
+        this.fn = 0;
+        this.fz = tmp == 0;
+      } else if (op1 == 3) {
+        // RR r
+        const carry = r & 0x1;
+        const tmp = ((this.fc << 7) | (r >> 1)) & 0xff;
+        this.writeRegister(op2, tmp);
+        this.fc = carry != 0;
+        this.fh = 0;
+        this.fn = 0;
+        this.fz = tmp == 0;
+      } else if (op1 == 4) {
+        // SLA r
+        const carry = r & 0x80;
+        const tmp = (r << 1) & 0xff;
+        this.writeRegister(op2, tmp);
+        this.fc = carry != 0;
+        this.fh = 0;
+        this.fn = 0;
+        this.fz = tmp == 0;
+      } else if (op1 == 5) {
+        // SRA r
+        const carry = r & 0x1;
+        const tmp = ((r & 0x80) | (r >> 1)) & 0xff;
+        this.writeRegister(op2, tmp);
+        this.fc = carry != 0;
+        this.fh = 0;
+        this.fn = 0;
+        this.fz = tmp == 0;
+      } else if (op1 == 6) {
+        // SWAP r
+        const tmp = ((r << 4) | (r >> 4)) & 0xff;
+        this.writeRegister(op2, tmp);
+        this.fc = 0;
+        this.fh = 0;
+        this.fn = 0;
+        this.fz = tmp == 0;
+      } else if (op1 == 7) {
+        // SRL r
+        const carry = r & 0x1;
+        const tmp = (r >> 1) & 0xff;
+        this.writeRegister(op2, tmp);
+        this.fc = carry != 0;
+        this.fh = 0;
+        this.fn = 0;
+        this.fz = tmp == 0;
+      }
+    } else if (quad == 1) {
+      // BIT b, r
+      this.fh = true;
+      this.fn = false;
+      this.fz = (this.readRegister(op2) & (1 << op1)) == 0;
+    } else if (quad == 2) {
+      // RES b, r
+      this.writeRegister(op2, this.readRegister(op2) & ~(1 << op1))
+    } else if (quad == 3) {
+      // SET b, r
+      this.writeRegister(op2, this.readRegister(op2) | (1 << op1))
+    }
+    return cycles;
+  }
+}
+
+GameBoy.frequency = (4194304 / 4);//1048576;
+GameBoy.instrCycles = [
+  1, 3, 2, 2, 1, 1, 2, 1, 5, 2, 2, 2, 1, 1, 2, 1,
+  0, 3, 2, 2, 1, 1, 2, 1, 3, 2, 2, 2, 1, 1, 2, 1,
+  2, 3, 2, 2, 1, 1, 2, 1, 2, 2, 2, 2, 1, 1, 2, 1,
+  2, 3, 2, 2, 3, 3, 3, 1, 2, 2, 2, 2, 1, 1, 2, 1,
+  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,
+  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,
+  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,
+  2, 2, 2, 2, 2, 2, 0, 2, 1, 1, 1, 1, 1, 1, 2, 1,
+  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,
+  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,
+  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,
+  1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1,
+  2, 3, 3, 4, 3, 4, 2, 4, 2, 4, 3, 0, 3, 6, 2, 4,
+  2, 3, 3, 0, 3, 4, 2, 4, 2, 4, 3, 0, 3, 0, 2, 4,
+  3, 3, 2, 0, 0, 4, 2, 4, 4, 1, 4, 0, 0, 0, 2, 4,
+  3, 3, 2, 1, 0, 4, 2, 4, 3, 2, 4, 1, 0, 0, 2, 4,
+];
+GameBoy.cbInstrCycles = [
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 3, 2,
+  2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 3, 2,
+  2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 3, 2,
+  2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 3, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+  2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
+];
+GameBoy.joypadInterrupt = 0x10;
+GameBoy.serialInterrupt = 0x8;
+GameBoy.timerInterrupt = 0x4;
+GameBoy.statInterrupt = 0x2;
+GameBoy.vblankInterrupt = 0x1;
+GameBoy.interrupts = 0x1f;
+
+GameBoy.startTime = 0;
 
 /***/ }),
 
@@ -56,7 +1832,617 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
   \*********************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   Display: () => (/* binding */ Display)\n/* harmony export */ });\n/* harmony import */ var _cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./cpu.js */ \"./public/js/gb/cpu.js\");\n/* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../../dummylogger.js */ \"./public/dummylogger.js\");\n\n // Adjust based on actual exports\n\nclass Display {\n    constructor(gb) {\n        this.gb = gb;\n\n        this.lcdOn = true;\n        this.windowTilemap = false;\n        this.windowOn = false;\n        this.bgWindowTileMode = true;\n        this.bgTilemap = false;\n        this.objHeight = false;\n        this.objOn = false;\n        this.bgOn = true;\n\n        this.lycMatchInt = false;\n        this.mode10Int = false;\n        this.mode01Int = false;\n        this.mode00Int = false;\n        this.lycMatch = false;\n        this.mode = 0;\n\n        this.scy = 0;\n        this.scx = 0;\n\n        this.ly = 0;\n\n        this.lyc = 0;\n\n        this._bgp = 0;\n        this._obp0 = 0;\n        this._obp1 = 0;\n\n        this.bgPalette = [0, 0, 0, 0];\n        this.objPalette = [[0, 0, 0, 0], [0, 0, 0, 0]];\n\n        this.bgColorIndex = 0;\n        this.bgColorInc = false;\n\n        this.objColorIndex = 0;\n        this.objColorInc = false;\n\n        this._bcpd = new Uint8Array(0x40);\n        this._ocpd = new Uint8Array(0x40);\n\n        this.bgColorPalette = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];\n        this.objColorPalette = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];\n\n        this.wy = 0;\n        this.wx = 0;\n\n        this._vbk = 0;\n\n        this.hdmaSrc = 0;\n        this.hdmaDst = 0;\n\n        this._hdma5 = 0;\n\n        this.hdmaOn = false;\n        this.hblankHdmaOn = false;\n        this.hdmaTrigger = false;\n        this.hdmaCounter = 0;\n\n        this.cycles = 0;\n        this.windowLine = 0;\n\n        this.statInterrupt = false;\n\n        this.vram = new Uint8Array(0x4000);\n        this.oam = new Uint8Array(0xa0);\n\n        this.imageData = Display.ctx.createImageData(Display.canvasWidth, Display.canvasHeight);\n        this.pixels = new Uint32Array(this.imageData.data.buffer);\n        this.bgClear = new Uint8Array(Display.width);\n        this.bgPriority = new Uint8Array(Display.width);\n\n        this.priorRenderLap = 0;\n    }\n\n    get lcdc() {\n        return (this.lcdOn << 7) | (this.windowTilemap << 6) | (this.windowOn << 5) | (this.bgWindowTileMode << 4) | (this.bgTilemap << 3) | (this.objHeight << 2) | (this.objOn << 1) | this.bgOn;\n    }\n\n    set lcdc(value) {\n        this.lcdOn = (value & 0x80) != 0;\n        this.windowTilemap = (value & 0x40) != 0;\n        this.windowOn = (value & 0x20) != 0;\n        this.bgWindowTileMode = (value & 0x10) != 0;\n        this.bgTilemap = (value & 0x8) != 0;\n        this.objHeight = (value & 0x4) != 0;\n        this.objOn = (value & 0x2) != 0;\n        this.bgOn = (value & 0x1) != 0;\n    }\n\n    get stat() {\n        return 0x80 | (this.lycMatchInt << 6) | (this.mode10Int << 5) | (this.mode01Int << 4) | (this.mode00Int << 3) | (this.lycMatch << 2) | this.mode;\n    }\n\n    set stat(value) {\n        this.lycMatchInt = (value & 0x40) != 0;\n        this.mode10Int = (value & 0x20) != 0;\n        this.mode01Int = (value & 0x10) != 0;\n        this.mode00Int = (value & 0x8) != 0;\n    }\n\n    set dma(value) {\n        const src = value << 8;\n        for (let index = 0; index < this.oam.length; index++) {\n            this.oam[index] = this.gb.readAddress(src + index)\n        }\n    }\n\n    get bgp() {\n        return this._bgp;\n    }\n\n    set bgp(value) {\n        this._bgp = value;\n        this.bgPalette = [value & 0x3, (value >> 2) & 0x3, (value >> 4) & 0x3, (value >> 6) & 0x3];\n    }\n\n    get obp0() {\n        return this._obp0;\n    }\n\n    set obp0(value) {\n        this._obp0 = value;\n        this.objPalette[0] = [value & 0x3, (value >> 2) & 0x3, (value >> 4) & 0x3, (value >> 6) & 0x3];\n    }\n\n    get obp1() {\n        return this._obp1;\n    }\n\n    set obp1(value) {\n        this._obp1 = value;\n        this.objPalette[1] = [value & 0x3, (value >> 2) & 0x3, (value >> 4) & 0x3, (value >> 6) & 0x3];\n    }\n\n    set hdma1(value) {\n        if (!this.gb.cgb) {\n            return;\n        }\n        this.hdmaSrc = (value << 8) | (this.hdmaSrc & 0x00ff);\n    }\n\n    set hdma2(value) {\n        if (!this.gb.cgb) {\n            return;\n        }\n        this.hdmaSrc = (this.hdmaSrc & 0xff00) | (value & 0xf0);\n    }\n\n    set hdma3(value) {\n        if (!this.gb.cgb) {\n            return;\n        }\n        this.hdmaDst = ((value & 0x1f) << 8) | (this.hdmaDst & 0x00ff);\n    }\n\n    set hdma4(value) {\n        if (!this.gb.cgb) {\n            return;\n        }\n        this.hdmaDst = (this.hdmaDst & 0xff00) | (value & 0xf0);\n    }\n\n    get hdma5() {\n        if (!this.gb.cgb) {\n            return 0xff;\n        }\n        return ((!this.hdmaOn && !this.hblankHdmaOn) << 7) | ((this.hdmaCounter - 1) & 0x7f);\n    }\n\n    set hdma5(value) {\n        if (!this.gb.cgb) {\n            return;\n        }\n        if ((value & 0x80) == 0 && this.hblankHdmaOn) {\n            this.hblankHdmaOn = false;\n            return;\n        }\n        this.hdmaOn = (value & 0x80) == 0;\n        this.hblankHdmaOn = (value & 0x80) != 0;\n        if (this.hblankHdmaOn && this.mode == Display.modes.hblank) {\n            this.hdmaOn = true;\n        }\n        this._hdma5 = value;\n        this.hdmaCounter = (value & 0x7f) + 1;\n    }\n\n    get bcps() {\n        if (!this.gb.cgb) {\n            return 0xff;\n        }\n        return 0x40 | (this.bgColorInc << 7) | this.bgColorIndex;\n    }\n\n    set bcps(value) {\n        if (!this.gb.cgb) {\n            return;\n        }\n        this.bgColorInc = (value & 0x80) != 0;\n        this.bgColorIndex = value & 0x3f;\n    }\n\n    get bcpd() {\n        if (!this.gb.cgb) {\n            return 0xff;\n        }\n        return this._bcpd[this.bgColorIndex];\n    }\n\n    set bcpd(value) {\n        if (!this.gb.cgb) {\n            return;\n        }\n        this._bcpd[this.bgColorIndex] = value;\n        if ((this.bgColorIndex & 0x1) != 0) {\n            this.bgColorPalette[this.bgColorIndex >> 3][(this.bgColorIndex & 0x6) >> 1] = ((value & 0x7f) << 8) | (this.bgColorPalette[this.bgColorIndex >> 3][(this.bgColorIndex & 0x6) >> 1] & 0xff)\n        } else {\n            this.bgColorPalette[this.bgColorIndex >> 3][(this.bgColorIndex & 0x6) >> 1] = (this.bgColorPalette[this.bgColorIndex >> 3][(this.bgColorIndex & 0x6) >> 1] & 0xff00) | value;\n        }\n        if (this.bgColorInc) {\n            this.bgColorIndex = (this.bgColorIndex + 1) & 0x3f;\n        }\n    }\n\n    get ocps() {\n        if (!this.gb.cgb) {\n            return 0xff;\n        }\n        return 0x40 | (this.objColorInc << 7) | this.objColorIndex;\n    }\n\n    set ocps(value) {\n        if (!this.gb.cgb) {\n            return;\n        }\n        this.objColorInc = (value & 0x80) != 0;\n        this.objColorIndex = value & 0x3f;\n    }\n\n    get ocpd() {\n        if (!this.gb.cgb) {\n            return 0xff;\n        }\n        return this._ocpd[this.objColorIndex];\n    }\n\n    set ocpd(value) {\n        if (!this.gb.cgb) {\n            return;\n        }\n        this._ocpd[this.objColorIndex] = value;\n        if ((this.objColorIndex & 0x1) != 0) {\n            this.objColorPalette[this.objColorIndex >> 3][(this.objColorIndex & 0x6) >> 1] = ((value & 0x7f) << 8) | (this.objColorPalette[this.objColorIndex >> 3][(this.objColorIndex & 0x6) >> 1] & 0xff)\n        } else {\n            this.objColorPalette[this.objColorIndex >> 3][(this.objColorIndex & 0x6) >> 1] = (this.objColorPalette[this.objColorIndex >> 3][(this.objColorIndex & 0x6) >> 1] & 0xff00) | value;\n        }\n        if (this.objColorInc) {\n            this.objColorIndex = (this.objColorIndex + 1) & 0x3f;\n        }\n    }\n\n    get vbk() {\n        if (!this.gb.cgb) {\n            return 0xff;\n        }\n        return 0xfe | this._vbk;\n    }\n\n    set vbk(value) {\n        if (!this.gb.cgb) {\n            return;\n        }\n        this._vbk = value & 0x1;\n    }\n\n    readVRAM(address) {\n        return this.vram[(this._vbk << 13) | address];\n    }\n\n    writeVRAM(address, value) {\n        this.vram[(this._vbk << 13) | address] = value;\n    }\n\n    renderLine() {\n        const address = (this.ly + Display.canvasMargin) * Display.canvasWidth + Display.canvasMargin;\n        for (let x = 0; x < Display.width; x++) {\n            if (this.bgOn) {\n                if (this.windowOn && this.ly >= this.wy && x >= this.wx - 7) {\n                    const tilemapY = (this.windowLine >> 3) & 0x1f;\n                    const tilemapX = ((x - (this.wx - 7)) >> 3) & 0x1f;\n                    const tilemapAddress = (this.windowTilemap ? 0x1c00 : 0x1800) | (tilemapY << 5) | tilemapX;\n\n                    let tile = this.vram[tilemapAddress];\n                    if (!this.bgWindowTileMode && tile < 0x80) {\n                        tile += 0x100;\n                    }\n                    const tileY = this.windowLine & 0x7;\n                    const tileAddress = (tile << 4) | (tileY << 1);\n\n                    const tileX = (x - (this.wx - 7)) & 0x7;\n                    const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);\n\n                    this.bgClear[x] = palette;\n                    this.pixels[address + x] = Display.palette[this.bgPalette[palette]];\n                } else {\n                    const tilemapY = ((this.ly + this.scy) >> 3) & 0x1f;\n                    const tilemapX = ((x + this.scx) >> 3) & 0x1f;\n                    const tilemapAddress = (this.bgTilemap ? 0x1c00 : 0x1800) | (tilemapY << 5) | tilemapX;\n\n                    let tile = this.vram[tilemapAddress];\n                    if (!this.bgWindowTileMode && tile < 0x80) {\n                        tile += 0x100;\n                    }\n                    const tileY = (this.ly + this.scy) & 0x7;\n                    const tileAddress = (tile << 4) | (tileY << 1);\n\n                    const tileX = (x + this.scx) & 0x7;\n                    const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);\n\n                    this.bgClear[x] = palette;\n                    this.pixels[address + x] = Display.palette[this.bgPalette[palette]];\n                }\n            } else {\n                this.bgClear[x] = 0;\n                this.pixels[address + x] = 0xffffffff;\n            }\n        }\n\n        if (this.objOn) {\n            const objs = [];\n            for (let obj = 0; obj < 40 && objs.length < 10; obj++) {\n                const objY = this.oam[obj * 4] - 16;\n                const objX = this.oam[obj * 4 + 1] - 8;\n                const tileY = (this.ly - objY) & 0xff;\n                if (tileY < (this.objHeight ? 16 : 8)) {\n                    let index = objs.length;\n                    const compObjX = this.oam[objs[index - 1] * 4 + 1] - 8;\n                    while (index > 0 && objX < compObjX) {\n                        index--;\n                    }\n                    objs.splice(index, 0, obj);\n                }\n            }\n\n            for (let index = objs.length - 1; index >= 0; index--) {\n                const obj = objs[index];\n                const objY = this.oam[obj * 4] - 16;\n                const objX = this.oam[obj * 4 + 1] - 8;\n                const tile = this.oam[obj * 4 + 2] & (this.objHeight ? 0xfe : 0xff);\n                const attr = this.oam[obj * 4 + 3];\n                const priority = (attr & 0x80) != 0;\n                const yFlip = (attr & 0x40) != 0;\n                const xFlip = (attr & 0x20) != 0;\n                const paletteNumber = (attr & 0x10) >> 4;\n\n                if (objX > -8 && objX < Display.width) {\n                    let tileY = this.ly - objY;\n                    if (yFlip) {\n                        tileY = (this.objHeight ? 15 : 7) - tileY;\n                    }\n                    const tileAddress = (tile << 4) | (tileY << 1);\n\n                    for (let x = Math.max(objX, 0); x < Math.min(objX + 8, Display.width); x++) {\n                        let tileX = x - objX;\n                        if (xFlip) {\n                            tileX = 7 - tileX;\n                        }\n                        const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);\n\n                        if (palette != 0 && (!priority || this.bgClear[x] == 0)) {\n                            this.pixels[address + x] = Display.palette[this.objPalette[paletteNumber][palette]];\n                        }\n                    }\n                }\n            }\n        }\n    }\n\n    renderLineColor() {\n        const address = (this.ly + Display.canvasMargin) * Display.canvasWidth + Display.canvasMargin;\n        for (let x = 0; x < Display.width; x++) {\n            if (this.windowOn && this.ly >= this.wy && x >= this.wx - 7) {\n                const tilemapY = (this.windowLine >> 3) & 0x1f;\n                const tilemapX = ((x - (this.wx - 7)) >> 3) & 0x1f;\n                const tilemapAddress = (this.windowTilemap ? 0x1c00 : 0x1800) | (tilemapY << 5) | tilemapX;\n                const tileAttributeAddress = 0x2000 | tilemapAddress;\n\n                const attributes = this.vram[tileAttributeAddress];\n                this.bgPriority[x] = (attributes & 0x80) != 0;\n                const yFlip = (attributes & 0x40) != 0;\n                const xFlip = (attributes & 0x20) != 0;\n                const bankAddress = (attributes & 0x8) << 10;\n                const paletteNumber = attributes & 0x7;\n\n                let tile = this.vram[tilemapAddress];\n                if (!this.bgWindowTileMode && tile < 0x80) {\n                    tile += 0x100;\n                }\n                let tileY = this.windowLine & 0x7;\n                if (yFlip) {\n                    tileY = 7 - tileY;\n                }\n                const tileAddress = bankAddress | (tile << 4) | (tileY << 1);\n\n                let tileX = (x - (this.wx - 7)) & 0x7;\n                if (xFlip) {\n                    tileX = 7 - tileX;\n                }\n                const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);\n\n                this.bgClear[x] = palette;\n                this.pixels[address + x] = Display.colorPalette[this.bgColorPalette[paletteNumber][palette]];\n            } else {\n                const tilemapY = ((this.ly + this.scy) >> 3) & 0x1f;\n                const tilemapX = ((x + this.scx) >> 3) & 0x1f;\n                const tilemapAddress = (this.bgTilemap ? 0x1c00 : 0x1800) | (tilemapY << 5) | tilemapX;\n                const tileAttributeAddress = 0x2000 | tilemapAddress;\n\n                const attributes = this.vram[tileAttributeAddress];\n                this.bgPriority[x] = (attributes & 0x80) != 0;\n                const yFlip = (attributes & 0x40) != 0;\n                const xFlip = (attributes & 0x20) != 0;\n                const bankAddress = (attributes & 0x8) << 10;\n                const paletteNumber = attributes & 0x7;\n\n                let tile = this.vram[tilemapAddress];\n                if (!this.bgWindowTileMode && tile < 0x80) {\n                    tile += 0x100;\n                }\n                let tileY = (this.ly + this.scy) & 0x7;\n                if (yFlip) {\n                    tileY = 7 - tileY;\n                }\n                const tileAddress = bankAddress | (tile << 4) | (tileY << 1);\n\n                let tileX = (x + this.scx) & 0x7;\n                if (xFlip) {\n                    tileX = 7 - tileX;\n                }\n                const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);\n\n                this.bgClear[x] = palette;\n                this.pixels[address + x] = Display.colorPalette[this.bgColorPalette[paletteNumber][palette]];\n            }\n        }\n\n        if (this.objOn) {\n            const objs = [];\n            for (let obj = 0; obj < 40 && objs.length < 10; obj++) {\n                const objY = this.oam[obj * 4] - 16;\n                const tileY = (this.ly - objY) & 0xff;\n                if (tileY < (this.objHeight ? 16 : 8)) {\n                    objs.push(obj);\n                }\n            }\n\n            for (let index = objs.length - 1; index >= 0; index--) {\n                const obj = objs[index];\n                const objY = this.oam[obj * 4] - 16;\n                const objX = this.oam[obj * 4 + 1] - 8;\n                const tile = this.oam[obj * 4 + 2] & (this.objHeight ? 0xfe : 0xff);\n                const attr = this.oam[obj * 4 + 3];\n                const priority = (attr & 0x80) != 0;\n                const yFlip = (attr & 0x40) != 0;\n                const xFlip = (attr & 0x20) != 0;\n                const bankAddress = (attr & 0x8) << 10;\n                const paletteNumber = attr & 0x7;\n\n                if (objX > -8 && objX < Display.width) {\n                    let tileY = this.ly - objY;\n                    if (yFlip) {\n                        tileY = (this.objHeight ? 15 : 7) - tileY;\n                    }\n                    const tileAddress = bankAddress | (tile << 4) | (tileY << 1);\n\n                    for (let x = Math.max(objX, 0); x < Math.min(objX + 8, Display.width); x++) {\n                        let tileX = x - objX;\n                        if (xFlip) {\n                            tileX = 7 - tileX;\n                        }\n                        const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);\n\n                        if (palette != 0 && (!this.bgOn || this.bgClear[x] == 0 || (this.bgPriority[x] == 0 && !priority))) {\n                            this.pixels[address + x] = Display.colorPalette[this.objColorPalette[paletteNumber][palette]];\n                        }\n                    }\n                }\n            }\n        }\n    }\n\n    renderFrame() {\n        //customLog(\"%c render before\",\"background:blue; color:white\")\n        Display.ctx.putImageData(this.imageData, 0, 0);\n        Display.fps++;\n        //customLog(\"GameBoy start time: \", GameBoy.startTime.toFixed(3));\n        const current = performance.now();\n        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_1__.customLog)(\"%c render after(\" + Display.renderCpuCycles + \"): \" + (current - _cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime).toFixed(3),\"background:black; color:white\");\n        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_1__.customLog)(\"renderLap: \" + (current - this.priorRenderLap).toFixed(3));\n        this.priorRenderLap = current;\n        Display.renderCpuCycles = 0;\n    }\n\n    cycle() {\n        Display.renderCpuCycles++;\n\n        if (this.lcdOn) {\n            this.lycMatch = this.ly == this.lyc;\n\n            if (this.ly < Display.height) {\n                if (this.cycles == 0) {\n                    this.mode = Display.modes.searchOAM;\n                }\n                if (this.cycles == 80) {\n                    this.mode = Display.modes.transfer;\n                }\n                if (this.cycles == 248) {\n                    this.mode = Display.modes.hblank;\n                    if (this.gb.cgb) {\n                        this.renderLineColor();\n                    } else {\n                        this.renderLine();\n                    }\n                    if (this.hblankHdmaOn) {\n                        this.hdmaTrigger = true;\n                    }\n                }\n            }\n            if (this.ly == Display.height && this.cycles == 0) {\n                this.gb.requestInterrupt(_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.vblankInterrupt);\n                this.mode = Display.modes.vblank;\n                this.renderFrame();\n            }\n\n            const _statInterrupt = this.statInterrupt;\n            this.statInterrupt = (this.lycMatchInt && this.lycMatch) || (this.mode10Int && this.mode == Display.modes.searchOAM) || (this.mode01Int && this.mode == Display.modes.vblank) || (this.mode00Int && this.mode == Display.modes.hblank);\n            if (!_statInterrupt && this.statInterrupt) {\n                this.gb.requestInterrupt(_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.statInterrupt);\n            }\n\n            this.cycles += Display.cyclesPerCPUCycle;\n            if (this.cycles == Display.cyclesPerLine) {\n                this.cycles = 0;\n                if (this.windowOn && this.ly >= this.wy && this.wx <= 166) {\n                    this.windowLine++;\n                }\n                this.ly++;\n                if (this.ly == Display.linesPerFrame) {\n                    this.ly = 0;\n                    this.windowLine = 0;\n                }\n            }\n        } else {\n            this.cycles = 0;\n            this.ly = 0;\n            this.lycMatch = false;\n            this.mode = Display.modes.hblank;\n        }\n    }\n}\nDisplay.width = 160;\nDisplay.height = 144;\nDisplay.frequency = 4194304;\nDisplay.cyclesPerLine = 456;\nDisplay.linesPerFrame = 154;\nDisplay.cyclesPerCPUCycle = Display.frequency / (4194304 / 4);//GameBoy.frequency; // (4194304 / 1048576) == 4\nDisplay.cpuCyclesPerFrame = Display.cyclesPerLine * Display.linesPerFrame / Display.cyclesPerCPUCycle;\n                            // (456 * 154) / (4194304 / 1048576) == 70224 / 4 == 17556\nDisplay.frameDuration = Display.cpuCyclesPerFrame / (4194304 / 4);//GameBoy.frequency;\n                            // (456 * 154) / (4194304 / 1048576) / 1048576 = (456 * 154) / 4194304\nDisplay.frameInterval = Display.frameDuration * 1000; // 16.74 ms\nDisplay.palette = [\n    0xffe6f8da, 0xff99c886, 0xff437969, 0xff051f2a\n    //0xffffffff, 0xffaaaaaa, 0xff555555, 0xff000000,\n];\nDisplay.colorPalette = Array.from(Array(0x8000), (v, k) => {\n    const b = Math.floor((k >> 10) * 0xff / 0x1f);\n    const g = Math.floor(((k & 0x3e0) >> 5) * 0xff / 0x1f);\n    const r = Math.floor((k & 0x1f) * 0xff / 0x1f);\n    return 0xff000000 | (b << 16) | (g << 8) | r;\n});\nDisplay.modes = {\n    hblank: 0,\n    vblank: 1,\n    searchOAM: 2,\n    transfer: 3,\n}\nDisplay.canvasMargin = 16;\nDisplay.canvasWidth = Display.width + 2 * Display.canvasMargin;\nDisplay.canvasHeight = Display.height + 2 * Display.canvasMargin;\n/*\nDisplay.canvas = document.getElementById('canvas');\nDisplay.canvas.width = Display.canvasWidth;\nDisplay.canvas.height = Display.canvasHeight;\nDisplay.ctx = Display.canvas.getContext('2d');\n\n */\nDisplay.fps = 0;\nDisplay.renderCpuCycles = 0;\n\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/js/gb/display.js?");
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Display: () => (/* binding */ Display)
+/* harmony export */ });
+/* harmony import */ var _cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./cpu.js */ "./public/js/gb/cpu.js");
+/* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../../dummylogger.js */ "./public/dummylogger.js");
+
+ // Adjust based on actual exports
+
+class Display {
+    constructor(gb) {
+        this.gb = gb;
+
+        this.lcdOn = true;
+        this.windowTilemap = false;
+        this.windowOn = false;
+        this.bgWindowTileMode = true;
+        this.bgTilemap = false;
+        this.objHeight = false;
+        this.objOn = false;
+        this.bgOn = true;
+
+        this.lycMatchInt = false;
+        this.mode10Int = false;
+        this.mode01Int = false;
+        this.mode00Int = false;
+        this.lycMatch = false;
+        this.mode = 0;
+
+        this.scy = 0;
+        this.scx = 0;
+
+        this.ly = 0;
+
+        this.lyc = 0;
+
+        this._bgp = 0;
+        this._obp0 = 0;
+        this._obp1 = 0;
+
+        this.bgPalette = [0, 0, 0, 0];
+        this.objPalette = [[0, 0, 0, 0], [0, 0, 0, 0]];
+
+        this.bgColorIndex = 0;
+        this.bgColorInc = false;
+
+        this.objColorIndex = 0;
+        this.objColorInc = false;
+
+        this._bcpd = new Uint8Array(0x40);
+        this._ocpd = new Uint8Array(0x40);
+
+        this.bgColorPalette = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+        this.objColorPalette = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+
+        this.wy = 0;
+        this.wx = 0;
+
+        this._vbk = 0;
+
+        this.hdmaSrc = 0;
+        this.hdmaDst = 0;
+
+        this._hdma5 = 0;
+
+        this.hdmaOn = false;
+        this.hblankHdmaOn = false;
+        this.hdmaTrigger = false;
+        this.hdmaCounter = 0;
+
+        this.cycles = 0;
+        this.windowLine = 0;
+
+        this.statInterrupt = false;
+
+        this.vram = new Uint8Array(0x4000);
+        this.oam = new Uint8Array(0xa0);
+
+        this.imageData = Display.ctx.createImageData(Display.canvasWidth, Display.canvasHeight);
+        this.pixels = new Uint32Array(this.imageData.data.buffer);
+        this.bgClear = new Uint8Array(Display.width);
+        this.bgPriority = new Uint8Array(Display.width);
+
+        this.priorRenderLap = 0;
+    }
+
+    get lcdc() {
+        return (this.lcdOn << 7) | (this.windowTilemap << 6) | (this.windowOn << 5) | (this.bgWindowTileMode << 4) | (this.bgTilemap << 3) | (this.objHeight << 2) | (this.objOn << 1) | this.bgOn;
+    }
+
+    set lcdc(value) {
+        this.lcdOn = (value & 0x80) != 0;
+        this.windowTilemap = (value & 0x40) != 0;
+        this.windowOn = (value & 0x20) != 0;
+        this.bgWindowTileMode = (value & 0x10) != 0;
+        this.bgTilemap = (value & 0x8) != 0;
+        this.objHeight = (value & 0x4) != 0;
+        this.objOn = (value & 0x2) != 0;
+        this.bgOn = (value & 0x1) != 0;
+    }
+
+    get stat() {
+        return 0x80 | (this.lycMatchInt << 6) | (this.mode10Int << 5) | (this.mode01Int << 4) | (this.mode00Int << 3) | (this.lycMatch << 2) | this.mode;
+    }
+
+    set stat(value) {
+        this.lycMatchInt = (value & 0x40) != 0;
+        this.mode10Int = (value & 0x20) != 0;
+        this.mode01Int = (value & 0x10) != 0;
+        this.mode00Int = (value & 0x8) != 0;
+    }
+
+    set dma(value) {
+        const src = value << 8;
+        for (let index = 0; index < this.oam.length; index++) {
+            this.oam[index] = this.gb.readAddress(src + index)
+        }
+    }
+
+    get bgp() {
+        return this._bgp;
+    }
+
+    set bgp(value) {
+        this._bgp = value;
+        this.bgPalette = [value & 0x3, (value >> 2) & 0x3, (value >> 4) & 0x3, (value >> 6) & 0x3];
+    }
+
+    get obp0() {
+        return this._obp0;
+    }
+
+    set obp0(value) {
+        this._obp0 = value;
+        this.objPalette[0] = [value & 0x3, (value >> 2) & 0x3, (value >> 4) & 0x3, (value >> 6) & 0x3];
+    }
+
+    get obp1() {
+        return this._obp1;
+    }
+
+    set obp1(value) {
+        this._obp1 = value;
+        this.objPalette[1] = [value & 0x3, (value >> 2) & 0x3, (value >> 4) & 0x3, (value >> 6) & 0x3];
+    }
+
+    set hdma1(value) {
+        if (!this.gb.cgb) {
+            return;
+        }
+        this.hdmaSrc = (value << 8) | (this.hdmaSrc & 0x00ff);
+    }
+
+    set hdma2(value) {
+        if (!this.gb.cgb) {
+            return;
+        }
+        this.hdmaSrc = (this.hdmaSrc & 0xff00) | (value & 0xf0);
+    }
+
+    set hdma3(value) {
+        if (!this.gb.cgb) {
+            return;
+        }
+        this.hdmaDst = ((value & 0x1f) << 8) | (this.hdmaDst & 0x00ff);
+    }
+
+    set hdma4(value) {
+        if (!this.gb.cgb) {
+            return;
+        }
+        this.hdmaDst = (this.hdmaDst & 0xff00) | (value & 0xf0);
+    }
+
+    get hdma5() {
+        if (!this.gb.cgb) {
+            return 0xff;
+        }
+        return ((!this.hdmaOn && !this.hblankHdmaOn) << 7) | ((this.hdmaCounter - 1) & 0x7f);
+    }
+
+    set hdma5(value) {
+        if (!this.gb.cgb) {
+            return;
+        }
+        if ((value & 0x80) == 0 && this.hblankHdmaOn) {
+            this.hblankHdmaOn = false;
+            return;
+        }
+        this.hdmaOn = (value & 0x80) == 0;
+        this.hblankHdmaOn = (value & 0x80) != 0;
+        if (this.hblankHdmaOn && this.mode == Display.modes.hblank) {
+            this.hdmaOn = true;
+        }
+        this._hdma5 = value;
+        this.hdmaCounter = (value & 0x7f) + 1;
+    }
+
+    get bcps() {
+        if (!this.gb.cgb) {
+            return 0xff;
+        }
+        return 0x40 | (this.bgColorInc << 7) | this.bgColorIndex;
+    }
+
+    set bcps(value) {
+        if (!this.gb.cgb) {
+            return;
+        }
+        this.bgColorInc = (value & 0x80) != 0;
+        this.bgColorIndex = value & 0x3f;
+    }
+
+    get bcpd() {
+        if (!this.gb.cgb) {
+            return 0xff;
+        }
+        return this._bcpd[this.bgColorIndex];
+    }
+
+    set bcpd(value) {
+        if (!this.gb.cgb) {
+            return;
+        }
+        this._bcpd[this.bgColorIndex] = value;
+        if ((this.bgColorIndex & 0x1) != 0) {
+            this.bgColorPalette[this.bgColorIndex >> 3][(this.bgColorIndex & 0x6) >> 1] = ((value & 0x7f) << 8) | (this.bgColorPalette[this.bgColorIndex >> 3][(this.bgColorIndex & 0x6) >> 1] & 0xff)
+        } else {
+            this.bgColorPalette[this.bgColorIndex >> 3][(this.bgColorIndex & 0x6) >> 1] = (this.bgColorPalette[this.bgColorIndex >> 3][(this.bgColorIndex & 0x6) >> 1] & 0xff00) | value;
+        }
+        if (this.bgColorInc) {
+            this.bgColorIndex = (this.bgColorIndex + 1) & 0x3f;
+        }
+    }
+
+    get ocps() {
+        if (!this.gb.cgb) {
+            return 0xff;
+        }
+        return 0x40 | (this.objColorInc << 7) | this.objColorIndex;
+    }
+
+    set ocps(value) {
+        if (!this.gb.cgb) {
+            return;
+        }
+        this.objColorInc = (value & 0x80) != 0;
+        this.objColorIndex = value & 0x3f;
+    }
+
+    get ocpd() {
+        if (!this.gb.cgb) {
+            return 0xff;
+        }
+        return this._ocpd[this.objColorIndex];
+    }
+
+    set ocpd(value) {
+        if (!this.gb.cgb) {
+            return;
+        }
+        this._ocpd[this.objColorIndex] = value;
+        if ((this.objColorIndex & 0x1) != 0) {
+            this.objColorPalette[this.objColorIndex >> 3][(this.objColorIndex & 0x6) >> 1] = ((value & 0x7f) << 8) | (this.objColorPalette[this.objColorIndex >> 3][(this.objColorIndex & 0x6) >> 1] & 0xff)
+        } else {
+            this.objColorPalette[this.objColorIndex >> 3][(this.objColorIndex & 0x6) >> 1] = (this.objColorPalette[this.objColorIndex >> 3][(this.objColorIndex & 0x6) >> 1] & 0xff00) | value;
+        }
+        if (this.objColorInc) {
+            this.objColorIndex = (this.objColorIndex + 1) & 0x3f;
+        }
+    }
+
+    get vbk() {
+        if (!this.gb.cgb) {
+            return 0xff;
+        }
+        return 0xfe | this._vbk;
+    }
+
+    set vbk(value) {
+        if (!this.gb.cgb) {
+            return;
+        }
+        this._vbk = value & 0x1;
+    }
+
+    readVRAM(address) {
+        return this.vram[(this._vbk << 13) | address];
+    }
+
+    writeVRAM(address, value) {
+        this.vram[(this._vbk << 13) | address] = value;
+    }
+
+    renderLine() {
+        const address = (this.ly + Display.canvasMargin) * Display.canvasWidth + Display.canvasMargin;
+        for (let x = 0; x < Display.width; x++) {
+            if (this.bgOn) {
+                if (this.windowOn && this.ly >= this.wy && x >= this.wx - 7) {
+                    const tilemapY = (this.windowLine >> 3) & 0x1f;
+                    const tilemapX = ((x - (this.wx - 7)) >> 3) & 0x1f;
+                    const tilemapAddress = (this.windowTilemap ? 0x1c00 : 0x1800) | (tilemapY << 5) | tilemapX;
+
+                    let tile = this.vram[tilemapAddress];
+                    if (!this.bgWindowTileMode && tile < 0x80) {
+                        tile += 0x100;
+                    }
+                    const tileY = this.windowLine & 0x7;
+                    const tileAddress = (tile << 4) | (tileY << 1);
+
+                    const tileX = (x - (this.wx - 7)) & 0x7;
+                    const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);
+
+                    this.bgClear[x] = palette;
+                    this.pixels[address + x] = Display.palette[this.bgPalette[palette]];
+                } else {
+                    const tilemapY = ((this.ly + this.scy) >> 3) & 0x1f;
+                    const tilemapX = ((x + this.scx) >> 3) & 0x1f;
+                    const tilemapAddress = (this.bgTilemap ? 0x1c00 : 0x1800) | (tilemapY << 5) | tilemapX;
+
+                    let tile = this.vram[tilemapAddress];
+                    if (!this.bgWindowTileMode && tile < 0x80) {
+                        tile += 0x100;
+                    }
+                    const tileY = (this.ly + this.scy) & 0x7;
+                    const tileAddress = (tile << 4) | (tileY << 1);
+
+                    const tileX = (x + this.scx) & 0x7;
+                    const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);
+
+                    this.bgClear[x] = palette;
+                    this.pixels[address + x] = Display.palette[this.bgPalette[palette]];
+                }
+            } else {
+                this.bgClear[x] = 0;
+                this.pixels[address + x] = 0xffffffff;
+            }
+        }
+
+        if (this.objOn) {
+            const objs = [];
+            for (let obj = 0; obj < 40 && objs.length < 10; obj++) {
+                const objY = this.oam[obj * 4] - 16;
+                const objX = this.oam[obj * 4 + 1] - 8;
+                const tileY = (this.ly - objY) & 0xff;
+                if (tileY < (this.objHeight ? 16 : 8)) {
+                    let index = objs.length;
+                    const compObjX = this.oam[objs[index - 1] * 4 + 1] - 8;
+                    while (index > 0 && objX < compObjX) {
+                        index--;
+                    }
+                    objs.splice(index, 0, obj);
+                }
+            }
+
+            for (let index = objs.length - 1; index >= 0; index--) {
+                const obj = objs[index];
+                const objY = this.oam[obj * 4] - 16;
+                const objX = this.oam[obj * 4 + 1] - 8;
+                const tile = this.oam[obj * 4 + 2] & (this.objHeight ? 0xfe : 0xff);
+                const attr = this.oam[obj * 4 + 3];
+                const priority = (attr & 0x80) != 0;
+                const yFlip = (attr & 0x40) != 0;
+                const xFlip = (attr & 0x20) != 0;
+                const paletteNumber = (attr & 0x10) >> 4;
+
+                if (objX > -8 && objX < Display.width) {
+                    let tileY = this.ly - objY;
+                    if (yFlip) {
+                        tileY = (this.objHeight ? 15 : 7) - tileY;
+                    }
+                    const tileAddress = (tile << 4) | (tileY << 1);
+
+                    for (let x = Math.max(objX, 0); x < Math.min(objX + 8, Display.width); x++) {
+                        let tileX = x - objX;
+                        if (xFlip) {
+                            tileX = 7 - tileX;
+                        }
+                        const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);
+
+                        if (palette != 0 && (!priority || this.bgClear[x] == 0)) {
+                            this.pixels[address + x] = Display.palette[this.objPalette[paletteNumber][palette]];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    renderLineColor() {
+        const address = (this.ly + Display.canvasMargin) * Display.canvasWidth + Display.canvasMargin;
+        for (let x = 0; x < Display.width; x++) {
+            if (this.windowOn && this.ly >= this.wy && x >= this.wx - 7) {
+                const tilemapY = (this.windowLine >> 3) & 0x1f;
+                const tilemapX = ((x - (this.wx - 7)) >> 3) & 0x1f;
+                const tilemapAddress = (this.windowTilemap ? 0x1c00 : 0x1800) | (tilemapY << 5) | tilemapX;
+                const tileAttributeAddress = 0x2000 | tilemapAddress;
+
+                const attributes = this.vram[tileAttributeAddress];
+                this.bgPriority[x] = (attributes & 0x80) != 0;
+                const yFlip = (attributes & 0x40) != 0;
+                const xFlip = (attributes & 0x20) != 0;
+                const bankAddress = (attributes & 0x8) << 10;
+                const paletteNumber = attributes & 0x7;
+
+                let tile = this.vram[tilemapAddress];
+                if (!this.bgWindowTileMode && tile < 0x80) {
+                    tile += 0x100;
+                }
+                let tileY = this.windowLine & 0x7;
+                if (yFlip) {
+                    tileY = 7 - tileY;
+                }
+                const tileAddress = bankAddress | (tile << 4) | (tileY << 1);
+
+                let tileX = (x - (this.wx - 7)) & 0x7;
+                if (xFlip) {
+                    tileX = 7 - tileX;
+                }
+                const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);
+
+                this.bgClear[x] = palette;
+                this.pixels[address + x] = Display.colorPalette[this.bgColorPalette[paletteNumber][palette]];
+            } else {
+                const tilemapY = ((this.ly + this.scy) >> 3) & 0x1f;
+                const tilemapX = ((x + this.scx) >> 3) & 0x1f;
+                const tilemapAddress = (this.bgTilemap ? 0x1c00 : 0x1800) | (tilemapY << 5) | tilemapX;
+                const tileAttributeAddress = 0x2000 | tilemapAddress;
+
+                const attributes = this.vram[tileAttributeAddress];
+                this.bgPriority[x] = (attributes & 0x80) != 0;
+                const yFlip = (attributes & 0x40) != 0;
+                const xFlip = (attributes & 0x20) != 0;
+                const bankAddress = (attributes & 0x8) << 10;
+                const paletteNumber = attributes & 0x7;
+
+                let tile = this.vram[tilemapAddress];
+                if (!this.bgWindowTileMode && tile < 0x80) {
+                    tile += 0x100;
+                }
+                let tileY = (this.ly + this.scy) & 0x7;
+                if (yFlip) {
+                    tileY = 7 - tileY;
+                }
+                const tileAddress = bankAddress | (tile << 4) | (tileY << 1);
+
+                let tileX = (x + this.scx) & 0x7;
+                if (xFlip) {
+                    tileX = 7 - tileX;
+                }
+                const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);
+
+                this.bgClear[x] = palette;
+                this.pixels[address + x] = Display.colorPalette[this.bgColorPalette[paletteNumber][palette]];
+            }
+        }
+
+        if (this.objOn) {
+            const objs = [];
+            for (let obj = 0; obj < 40 && objs.length < 10; obj++) {
+                const objY = this.oam[obj * 4] - 16;
+                const tileY = (this.ly - objY) & 0xff;
+                if (tileY < (this.objHeight ? 16 : 8)) {
+                    objs.push(obj);
+                }
+            }
+
+            for (let index = objs.length - 1; index >= 0; index--) {
+                const obj = objs[index];
+                const objY = this.oam[obj * 4] - 16;
+                const objX = this.oam[obj * 4 + 1] - 8;
+                const tile = this.oam[obj * 4 + 2] & (this.objHeight ? 0xfe : 0xff);
+                const attr = this.oam[obj * 4 + 3];
+                const priority = (attr & 0x80) != 0;
+                const yFlip = (attr & 0x40) != 0;
+                const xFlip = (attr & 0x20) != 0;
+                const bankAddress = (attr & 0x8) << 10;
+                const paletteNumber = attr & 0x7;
+
+                if (objX > -8 && objX < Display.width) {
+                    let tileY = this.ly - objY;
+                    if (yFlip) {
+                        tileY = (this.objHeight ? 15 : 7) - tileY;
+                    }
+                    const tileAddress = bankAddress | (tile << 4) | (tileY << 1);
+
+                    for (let x = Math.max(objX, 0); x < Math.min(objX + 8, Display.width); x++) {
+                        let tileX = x - objX;
+                        if (xFlip) {
+                            tileX = 7 - tileX;
+                        }
+                        const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);
+
+                        if (palette != 0 && (!this.bgOn || this.bgClear[x] == 0 || (this.bgPriority[x] == 0 && !priority))) {
+                            this.pixels[address + x] = Display.colorPalette[this.objColorPalette[paletteNumber][palette]];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    renderFrame() {
+        //customLog("%c render before","background:blue; color:white")
+        Display.ctx.putImageData(this.imageData, 0, 0);
+        Display.fps++;
+        //customLog("GameBoy start time: ", GameBoy.startTime.toFixed(3));
+        const current = performance.now();
+        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_1__.customLog)("%c render after(" + Display.renderCpuCycles + "): " + (current - _cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime).toFixed(3),"background:black; color:white");
+        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_1__.customLog)("renderLap: " + (current - this.priorRenderLap).toFixed(3));
+        this.priorRenderLap = current;
+        Display.renderCpuCycles = 0;
+    }
+
+    cycle() {
+        Display.renderCpuCycles++;
+
+        if (this.lcdOn) {
+            this.lycMatch = this.ly == this.lyc;
+
+            if (this.ly < Display.height) {
+                if (this.cycles == 0) {
+                    this.mode = Display.modes.searchOAM;
+                }
+                if (this.cycles == 80) {
+                    this.mode = Display.modes.transfer;
+                }
+                if (this.cycles == 248) {
+                    this.mode = Display.modes.hblank;
+                    if (this.gb.cgb) {
+                        this.renderLineColor();
+                    } else {
+                        this.renderLine();
+                    }
+                    if (this.hblankHdmaOn) {
+                        this.hdmaTrigger = true;
+                    }
+                }
+            }
+            if (this.ly == Display.height && this.cycles == 0) {
+                this.gb.requestInterrupt(_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.vblankInterrupt);
+                this.mode = Display.modes.vblank;
+                this.renderFrame();
+            }
+
+            const _statInterrupt = this.statInterrupt;
+            this.statInterrupt = (this.lycMatchInt && this.lycMatch) || (this.mode10Int && this.mode == Display.modes.searchOAM) || (this.mode01Int && this.mode == Display.modes.vblank) || (this.mode00Int && this.mode == Display.modes.hblank);
+            if (!_statInterrupt && this.statInterrupt) {
+                this.gb.requestInterrupt(_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.statInterrupt);
+            }
+
+            this.cycles += Display.cyclesPerCPUCycle;
+            if (this.cycles == Display.cyclesPerLine) {
+                this.cycles = 0;
+                if (this.windowOn && this.ly >= this.wy && this.wx <= 166) {
+                    this.windowLine++;
+                }
+                this.ly++;
+                if (this.ly == Display.linesPerFrame) {
+                    this.ly = 0;
+                    this.windowLine = 0;
+                }
+            }
+        } else {
+            this.cycles = 0;
+            this.ly = 0;
+            this.lycMatch = false;
+            this.mode = Display.modes.hblank;
+        }
+    }
+}
+Display.width = 160;
+Display.height = 144;
+Display.frequency = 4194304;
+Display.cyclesPerLine = 456;
+Display.linesPerFrame = 154;
+Display.cyclesPerCPUCycle = Display.frequency / (4194304 / 4);//GameBoy.frequency; // (4194304 / 1048576) == 4
+Display.cpuCyclesPerFrame = Display.cyclesPerLine * Display.linesPerFrame / Display.cyclesPerCPUCycle;
+                            // (456 * 154) / (4194304 / 1048576) == 70224 / 4 == 17556
+Display.frameDuration = Display.cpuCyclesPerFrame / (4194304 / 4);//GameBoy.frequency;
+                            // (456 * 154) / (4194304 / 1048576) / 1048576 = (456 * 154) / 4194304
+Display.frameInterval = Display.frameDuration * 1000; // 16.74 ms
+Display.palette = [
+    0xffe6f8da, 0xff99c886, 0xff437969, 0xff051f2a
+    //0xffffffff, 0xffaaaaaa, 0xff555555, 0xff000000,
+];
+Display.colorPalette = Array.from(Array(0x8000), (v, k) => {
+    const b = Math.floor((k >> 10) * 0xff / 0x1f);
+    const g = Math.floor(((k & 0x3e0) >> 5) * 0xff / 0x1f);
+    const r = Math.floor((k & 0x1f) * 0xff / 0x1f);
+    return 0xff000000 | (b << 16) | (g << 8) | r;
+});
+Display.modes = {
+    hblank: 0,
+    vblank: 1,
+    searchOAM: 2,
+    transfer: 3,
+}
+Display.canvasMargin = 16;
+Display.canvasWidth = Display.width + 2 * Display.canvasMargin;
+Display.canvasHeight = Display.height + 2 * Display.canvasMargin;
+/*
+Display.canvas = document.getElementById('canvas');
+Display.canvas.width = Display.canvasWidth;
+Display.canvas.height = Display.canvasHeight;
+Display.ctx = Display.canvas.getContext('2d');
+
+ */
+Display.fps = 0;
+Display.renderCpuCycles = 0;
+
 
 /***/ }),
 
@@ -66,7 +2452,51 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
   \********************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   Joypad: () => (/* binding */ Joypad)\n/* harmony export */ });\nclass Joypad {\n    constructor(gb, keySharedBuffer) {\n        this.gb = gb;\n\n        this._p1 = 0;\n\n        this._key = new Int32Array(keySharedBuffer);\n\n/*        this.start = false; //0  Enter\n        this.select = false; //1 ShiftRight\n        this.b = false;//2 KeyZ\n        this.a = false;//3 KeyX\n\n        this.down = false;//4  ArrowDown\n        this.up = false;//5  ArrowUp\n        this.left = false;//6  ArrowLeft\n        this.right = false;//7  ArrowRight*/\n    }\n\n    set a(value) {\n        this._key[3] = value;\n    }\n\n    get p1() {\n        switch (this._p1) {\n            case 0:\n                return 0xc0 | (!(this._key[0] || this._key[4]) << 3) | (!(this._key[1] || this._key[5]) << 2) | (!(this._key[2] || this._key[6]) << 1) | !(this._key[3] || this._key[7]);\n            case 1:\n                return 0xd0 | (!this._key[0] << 3) | (!this._key[1] << 2) | (!this._key[2] << 1) | !this._key[3];\n            case 2:\n                return 0xe0 | (!this._key[4] << 3) | (!this._key[5] << 2) | (!this._key[6] << 1) | !this._key[7];\n            case 3:\n                return 0xff;\n        }\n    }\n\n    set p1(value) {\n        this._p1 = (value & 0x30) >> 4;\n    }\n}\n\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/js/gb/joypad.js?");
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Joypad: () => (/* binding */ Joypad)
+/* harmony export */ });
+class Joypad {
+    constructor(gb, keySharedBuffer) {
+        this.gb = gb;
+
+        this._p1 = 0;
+
+        this._key = new Int32Array(keySharedBuffer);
+
+/*        this.start = false; //0  Enter
+        this.select = false; //1 ShiftRight
+        this.b = false;//2 KeyZ
+        this.a = false;//3 KeyX
+
+        this.down = false;//4  ArrowDown
+        this.up = false;//5  ArrowUp
+        this.left = false;//6  ArrowLeft
+        this.right = false;//7  ArrowRight*/
+    }
+
+    set a(value) {
+        this._key[3] = value;
+    }
+
+    get p1() {
+        switch (this._p1) {
+            case 0:
+                return 0xc0 | (!(this._key[0] || this._key[4]) << 3) | (!(this._key[1] || this._key[5]) << 2) | (!(this._key[2] || this._key[6]) << 1) | !(this._key[3] || this._key[7]);
+            case 1:
+                return 0xd0 | (!this._key[0] << 3) | (!this._key[1] << 2) | (!this._key[2] << 1) | !this._key[3];
+            case 2:
+                return 0xe0 | (!this._key[4] << 3) | (!this._key[5] << 2) | (!this._key[6] << 1) | !this._key[7];
+            case 3:
+                return 0xff;
+        }
+    }
+
+    set p1(value) {
+        this._p1 = (value & 0x30) >> 4;
+    }
+}
+
 
 /***/ }),
 
@@ -76,7 +2506,121 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
   \********************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   Serial: () => (/* binding */ Serial)\n/* harmony export */ });\n/* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../../dummylogger.js */ \"./public/dummylogger.js\");\n // Adjust based on actual exports\n\nclass Serial {\n  constructor(gb, sbSharedBuffer, scSharedBuffer, transferTriggerSharedBuffer,\n      useInternalClockSharedBuffer, sharedBuffer) {\n    this.gb = gb;\n\n    this._sb = new Int32Array(sbSharedBuffer);\n    this._sc = new Int32Array(scSharedBuffer);\n\n    this.transferTrigger = new Int32Array(transferTriggerSharedBuffer);\n\n    //this.transferRunning = false;\n    this.transferInProgress = false;\n\n    //this.useInternalClock = false;\n    this.useInternalClock = new Int32Array(useInternalClockSharedBuffer);\n\n    this.fastClock = false;\n\n    //this.cycleCounter = 0;\n    //this.cycles = 0;\n    this.divider = 0;\n\n    this._messenger = null;\n\n    this._isReadySc = new Int32Array(scSharedBuffer);\n\n    //this.handleMessage = this.handleMessage.bind(this);\n    this._lock = new Int32Array(sharedBuffer);\n\n    this.serialCycle = 0;\n  }\n\n  set isReadySc(value) {\n    this._isReadySc[0] = value;\n  }\n\n  get isReadySc() {\n    return this._isReadySc[0];\n  }\n\n  set messenger(value) {\n    this._messenger = value;\n  }\n\n  get sb() {\n    const value = Atomics.load(this._sb, 0);\n    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(\"<< get sb \", value);\n    return value;\n  }\n\n  set sb(value) {\n    Atomics.store(this._sb, 0, value);\n    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(\">> set sb \", value);\n  }\n\n  get sc() {\n    //return 0x7e | (this.transferRunning << 7) | this.useInternalClock[0];\n    const value = Atomics.load(this._sc, 0);\n    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(\"<< get sc \", value);\n    return (0x7e | value);\n  }\n\n  set sc(value) {\n    /*\n        value = 128  0x 1000 0000\n                129  0x 1000 0001\n     */\n    Atomics.store(this._sc, 0, value);\n    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(\">> set sc \", value);\n\n    if ((value | 0x7E) === 0xFF) {\n      this.transferInProgress = true;\n      this.divider = 0;\n    }\n  }\n\n  cycle() {\n    this.serialCycle++;\n\n    if (this.transferInProgress) {\n      if (++this.divider >= Serial.transferTime) {\n        this.transferInProgress = false;\n        this._messenger.postMessage({\n          msg: 'Q',\n          payload: this._sb[0],\n          time: -1 //Atomics.load(this.gb.timing, 0)\n        });\n        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(\"%c 104 serial cycle:\" + this.serialCycle, \"background:brown; color:white\");\n        this.serialCycle = 0;\n        //customLog(\"++ serial blocked \", Atomics.load(this.gb.timing, 0));\n        Atomics.store(this._lock, 0, 1);\n        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(\"++ serial blocked \");\n        Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0\n        //customLog(\">> worker blocked\");\n      }\n    }\n  }\n}\n\nSerial.frequency = 8192;\nSerial.cpuCyclesPerCycle = (4194304 / 4) / Serial.frequency;//GameBoy.frequency / Serial.frequency;\nSerial.transferTime = Serial.cpuCyclesPerCycle * 8;\n//Serial.cpuCyclesPerCycle = (GameBoy.frequency * 4) / Serial.frequency;\n\nSerial.fastFrequency = 262144;\nSerial.cpuCyclesPerFastCycle = (4194304 / 4) / Serial.frequency;//GameBoy.frequency / Serial.frequency;\n//Serial.cpuCyclesPerFastCycle = GameBoy.frequency / Serial.fastFrequency;\n\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/js/gb/serial.js?");
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Serial: () => (/* binding */ Serial)
+/* harmony export */ });
+/* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../../dummylogger.js */ "./public/dummylogger.js");
+ // Adjust based on actual exports
+
+class Serial {
+  constructor(gb, sbSharedBuffer, scSharedBuffer, transferTriggerSharedBuffer,
+      useInternalClockSharedBuffer, sharedBuffer) {
+    this.gb = gb;
+
+    this._sb = new Int32Array(sbSharedBuffer);
+    this._sc = new Int32Array(scSharedBuffer);
+
+    this.transferTrigger = new Int32Array(transferTriggerSharedBuffer);
+
+    //this.transferRunning = false;
+    this.transferInProgress = false;
+
+    //this.useInternalClock = false;
+    this.useInternalClock = new Int32Array(useInternalClockSharedBuffer);
+
+    this.fastClock = false;
+
+    //this.cycleCounter = 0;
+    //this.cycles = 0;
+    this.divider = 0;
+
+    this._messenger = null;
+
+    this._isReadySc = new Int32Array(scSharedBuffer);
+
+    //this.handleMessage = this.handleMessage.bind(this);
+    this._lock = new Int32Array(sharedBuffer);
+
+    this.serialCycle = 0;
+  }
+
+  set isReadySc(value) {
+    this._isReadySc[0] = value;
+  }
+
+  get isReadySc() {
+    return this._isReadySc[0];
+  }
+
+  set messenger(value) {
+    this._messenger = value;
+  }
+
+  get sb() {
+    const value = Atomics.load(this._sb, 0);
+    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("<< get sb ", value);
+    return value;
+  }
+
+  set sb(value) {
+    Atomics.store(this._sb, 0, value);
+    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(">> set sb ", value);
+  }
+
+  get sc() {
+    //return 0x7e | (this.transferRunning << 7) | this.useInternalClock[0];
+    const value = Atomics.load(this._sc, 0);
+    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("<< get sc ", value);
+    return (0x7e | value);
+  }
+
+  set sc(value) {
+    /*
+        value = 128  0x 1000 0000
+                129  0x 1000 0001
+     */
+    Atomics.store(this._sc, 0, value);
+    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(">> set sc ", value);
+
+    if ((value | 0x7E) === 0xFF) {
+      this.transferInProgress = true;
+      this.divider = 0;
+    }
+  }
+
+  cycle() {
+    this.serialCycle++;
+
+    if (this.transferInProgress) {
+      if (++this.divider >= Serial.transferTime) {
+        this.transferInProgress = false;
+        this._messenger.postMessage({
+          msg: 'Q',
+          payload: this._sb[0],
+          time: -1 //Atomics.load(this.gb.timing, 0)
+        });
+        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("%c 104 serial cycle:" + this.serialCycle, "background:brown; color:white");
+        this.serialCycle = 0;
+        //customLog("++ serial blocked ", Atomics.load(this.gb.timing, 0));
+        Atomics.store(this._lock, 0, 1);
+        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("++ serial blocked ");
+        Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0
+        //customLog(">> worker blocked");
+      }
+    }
+  }
+}
+
+Serial.frequency = 8192;
+Serial.cpuCyclesPerCycle = (4194304 / 4) / Serial.frequency;//GameBoy.frequency / Serial.frequency;
+Serial.transferTime = Serial.cpuCyclesPerCycle * 8;
+//Serial.cpuCyclesPerCycle = (GameBoy.frequency * 4) / Serial.frequency;
+
+Serial.fastFrequency = 262144;
+Serial.cpuCyclesPerFastCycle = (4194304 / 4) / Serial.frequency;//GameBoy.frequency / Serial.frequency;
+//Serial.cpuCyclesPerFastCycle = GameBoy.frequency / Serial.fastFrequency;
+
 
 /***/ }),
 
@@ -86,7 +2630,720 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
   \*******************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   Sound: () => (/* binding */ Sound)\n/* harmony export */ });\nclass Sound {\n    constructor(gb, soundLeftSab, soundRightSab) {\n        this.gb = gb;\n\n        this.channel3WaveTable = [\n            0, 0, 0, 0, 0, 0, 0, 0,\n            0, 0, 0, 0, 0, 0, 0, 0,\n            0, 0, 0, 0, 0, 0, 0, 0,\n            0, 0, 0, 0, 0, 0, 0, 0,\n        ];\n\n        this.cycles = 0;\n        this.frame = 0;\n\n        this.clearState();\n\n        this.soundEnable = false;\n\n        /*\n        this.gainNode = Sound.ctx.createGain();\n        this.gainNode.gain.value = Sound.volume;\n        this.gainNode.connect(Sound.ctx.destination);\n        */\n\n        /*\n        this.buffer = Sound.ctx.createBuffer(2, Sound.bufferSamples, Sound.sampleFrequency);\n        this.bufferLeft = this.buffer.getChannelData(0);\n        this.bufferRight = this.buffer.getChannelData(1);\n        */\n\n        this.bufferLeft = new Float32Array(soundLeftSab);\n        this.bufferRight = new Float32Array(soundRightSab);\n\n        this._messenger = null;\n    }\n\n    set messenger(value) {\n        this._messenger = value;\n    }\n\n    get nr10() {\n        return 0x80 | (this.channel1SweepDuration << 4) | (this.channel1SweepDown << 3) | this.channel1SweepShift;\n    }\n\n    set nr10(value) {\n        this.channel1SweepDuration = (value & 0x70) >> 4;\n        this.channel1SweepDown = (value & 0x8) != 0;\n        this.channel1SweepShift = value & 0x7;\n    }\n\n    get nr11() {\n        return 0x3f | (this.channel1Duty << 6);\n    }\n\n    set nr11(value) {\n        this.channel1Duty = (value & 0xc0) >> 6;\n        this.channel1LengthCounter = 64 - (value & 0x3f);\n    }\n\n    get nr12() {\n        return (this.channel1InitialVolume << 4) | (this.channel1VolumeUp << 3) | this.channel1EnvelopeDuration;\n    }\n\n    set nr12(value) {\n        this.channel1InitialVolume = (value & 0xf0) >> 4;\n        this.channel1VolumeUp = (value & 0x8) != 0;\n        this.channel1EnvelopeDuration = value & 0x7;\n    }\n\n    get nr13() {\n        return 0xff;\n    }\n\n    set nr13(value) {\n        this.channel1Frequency = (this.channel1Frequency & 0x700) | value;\n    }\n\n    get nr14() {\n        return 0xbf | (this.channel1LengthEnable << 6);\n    }\n\n    set nr14(value) {\n        this.channel1Trigger = (value & 0x80) != 0;\n        this.channel1LengthEnable = (value & 0x40) != 0;\n        this.channel1Frequency = ((value & 0x7) << 8) | (this.channel1Frequency & 0xff);\n    }\n\n    get nr21() {\n        return 0x3f | (this.channel2Duty << 6);\n    }\n\n    set nr21(value) {\n        this.channel2Duty = (value & 0xc0) >> 6;\n        this.channel2LengthCounter = 64 - (value & 0x3f);\n    }\n\n    get nr22() {\n        return (this.channel2InitialVolume << 4) | (this.channel2VolumeUp << 3) | this.channel2EnvelopeDuration;\n    }\n\n    set nr22(value) {\n        this.channel2InitialVolume = (value & 0xf0) >> 4;\n        this.channel2VolumeUp = (value & 0x8) != 0;\n        this.channel2EnvelopeDuration = value & 0x7;\n    }\n\n    get nr23() {\n        return 0xff;\n    }\n\n    set nr23(value) {\n        this.channel2Frequency = (this.channel2Frequency & 0x700) | value;\n    }\n\n    get nr24() {\n        return 0xbf | (this.channel2LengthEnable << 6);\n    }\n\n    set nr24(value) {\n        this.channel2Trigger = (value & 0x80) != 0;\n        this.channel2LengthEnable = (value & 0x40) != 0;\n        this.channel2Frequency = ((value & 0x7) << 8) | (this.channel2Frequency & 0xff);\n    }\n\n    get nr30() {\n        return 0x7f | (this.channel3Play << 7);\n    }\n\n    set nr30(value) {\n        this.channel3Play = (value & 0x80) != 0;\n    }\n\n    get nr31() {\n        return 0xff;\n    }\n\n    set nr31(value) {\n        this.channel3LengthCounter = 256 - value;\n    }\n\n    get nr32() {\n        return 0x9f | (this.channel3Volume << 5);\n    }\n\n    set nr32(value) {\n        this.channel3Volume = (value & 0x60) >> 5;\n    }\n\n    get nr33() {\n        return 0xff;\n    }\n\n    set nr33(value) {\n        this.channel3Frequency = (this.channel3Frequency & 0x700) | value;\n    }\n\n    get nr34() {\n        return 0xbf | (this.channel3LengthEnable << 6);\n    }\n\n    set nr34(value) {\n        this.channel3Trigger = (value & 0x80) != 0;\n        this.channel3LengthEnable = (value & 0x40) != 0;\n        this.channel3Frequency = ((value & 0x7) << 8) | (this.channel3Frequency & 0xff);\n    }\n\n    get nr41() {\n        return 0xff;\n    }\n\n    set nr41(value) {\n        this.channel4LengthCounter = 64 - (value & 0x3f);\n    }\n\n    get nr42() {\n        return (this.channel4InitialVolume << 4) | (this.channel4VolumeUp << 3) | this.channel4EnvelopeDuration;\n    }\n\n    set nr42(value) {\n        this.channel4InitialVolume = (value & 0xf0) >> 4;\n        this.channel4VolumeUp = (value & 0x8) != 0;\n        this.channel4EnvelopeDuration = value & 0x7;\n    }\n\n    get nr43() {\n        return (this.channel4ShiftClockFrequency << 4) | (this.channel4CounterStep << 3) | this.channel4DivisionRatio;\n    }\n\n    set nr43(value) {\n        this.channel4ShiftClockFrequency = (value & 0xf0) >> 4;\n        this.channel4CounterStep = (value & 0x8) != 0;\n        this.channel4DivisionRatio = value & 0x7;\n    }\n\n    get nr44() {\n        return 0xbf | (this.channel4LengthEnable << 6);\n    }\n\n    set nr44(value) {\n        this.channel4Trigger = (value & 0x80) != 0;\n        this.channel4LengthEnable = (value & 0x40) != 0;\n    }\n\n    get nr50() {\n        return (this.outputVinRight << 7) | (this.rightVolume << 4) | (this.outputVinLeft << 3) | this.leftVolume;\n    }\n\n    set nr50(value) {\n        this.outputVinRight = (value & 0x80) != 0;\n        this.rightVolume = (value & 0x70) >> 4;\n        this.outputVinLeft = (value & 0x8) != 0;\n        this.leftVolume = value & 0x7;\n    }\n\n    get nr51() {\n        return (this.channel4RightEnable << 7) | (this.channel3RightEnable << 6) | (this.channel2RightEnable << 5) | (this.channel1RightEnable << 4) | (this.channel4LeftEnable << 3) | (this.channel3LeftEnable << 2) | (this.channel2LeftEnable << 1) | this.channel1LeftEnable;\n    }\n\n    set nr51(value) {\n        this.channel4RightEnable = (value & 0x80) != 0;\n        this.channel3RightEnable = (value & 0x40) != 0;\n        this.channel2RightEnable = (value & 0x20) != 0;\n        this.channel1RightEnable = (value & 0x10) != 0;\n        this.channel4LeftEnable = (value & 0x8) != 0;\n        this.channel3LeftEnable = (value & 0x4) != 0;\n        this.channel2LeftEnable = (value & 0x2) != 0;\n        this.channel1LeftEnable = (value & 0x1) != 0;\n    }\n\n    get nr52() {\n        return 0x70 | (this.soundEnable << 7) | (this.channel4Enable << 3) | (this.channel3Enable << 2) | (this.channel2Enable << 1) | this.channel1Enable;\n    }\n\n    set nr52(value) {\n        this.soundEnable = (value & 0x80) != 0;\n        if (!this.soundEnable) {\n            this.clearState();\n        }\n    }\n\n    readAddress(address) {\n        if (address <= 0x2f) {\n            switch (address) {\n                case 0x10: return this.nr10;\n                case 0x11: return this.nr11;\n                case 0x12: return this.nr12;\n                case 0x13: return this.nr13;\n                case 0x14: return this.nr14;\n                case 0x16: return this.nr21;\n                case 0x17: return this.nr22;\n                case 0x18: return this.nr23;\n                case 0x19: return this.nr24;\n                case 0x1a: return this.nr30;\n                case 0x1b: return this.nr31;\n                case 0x1c: return this.nr32;\n                case 0x1d: return this.nr33;\n                case 0x1e: return this.nr34;\n                case 0x20: return this.nr41;\n                case 0x21: return this.nr42;\n                case 0x22: return this.nr43;\n                case 0x23: return this.nr44;\n                case 0x24: return this.nr50;\n                case 0x25: return this.nr51;\n                case 0x26: return this.nr52;\n                default: return 0xff;\n            }\n        } else {\n            return this.readWave(address & 0xf);\n        }\n    }\n\n    writeAddress(address, value) {\n        if (this.soundEnable) {\n            if (address <= 0x2f) {\n                switch (address) {\n                    case 0x10: this.nr10 = value; break;\n                    case 0x11: this.nr11 = value; break;\n                    case 0x12: this.nr12 = value; break;\n                    case 0x13: this.nr13 = value; break;\n                    case 0x14: this.nr14 = value; break;\n                    case 0x16: this.nr21 = value; break;\n                    case 0x17: this.nr22 = value; break;\n                    case 0x18: this.nr23 = value; break;\n                    case 0x19: this.nr24 = value; break;\n                    case 0x1a: this.nr30 = value; break;\n                    case 0x1b: this.nr31 = value; break;\n                    case 0x1c: this.nr32 = value; break;\n                    case 0x1d: this.nr33 = value; break;\n                    case 0x1e: this.nr34 = value; break;\n                    case 0x20: this.nr41 = value; break;\n                    case 0x21: this.nr42 = value; break;\n                    case 0x22: this.nr43 = value; break;\n                    case 0x23: this.nr44 = value; break;\n                    case 0x24: this.nr50 = value; break;\n                    case 0x25: this.nr51 = value; break;\n                    case 0x26: this.nr52 = value; break;\n                    default: break;\n                }\n            } else {\n                this.writeWave(address & 0xf, value);\n            }\n        } else if (address == 0x26) {\n            this.nr52 = value;\n        }\n    }\n\n    readWave(address) {\n        return (this.channel3WaveTable[address * 2] << 4) | this.channel3WaveTable[address * 2 + 1];\n    }\n\n    writeWave(address, value) {\n        this.channel3WaveTable[address * 2] = (value & 0xf0) >> 4;\n        this.channel3WaveTable[address * 2 + 1] = value & 0xf;\n    }\n\n    clearState() {\n        this.frame = 0;\n        this.channel1Enable = false;\n        this.channel2Enable = false;\n        this.channel3Enable = false;\n        this.channel4Enable = false;\n        this.channel1SweepDuration = 0;\n        this.channel1SweepDown = false;\n        this.channel1SweepShift = 0;\n        this.channel1SweepEnable = false;\n        this.channel1Duty = 0;\n        this.channel1InitialVolume = 0;\n        this.channel1VolumeUp = false;\n        this.channel1EnvelopeDuration = 0;\n        this.channel1Frequency = 0;\n        this.channel1Trigger = false;\n        this.channel1LengthEnable = false;\n        this.channel2Duty = 0;\n        this.channel2InitialVolume = 0;\n        this.channel2VolumeUp = false;\n        this.channel2EnvelopeDuration = 0;\n        this.channel2Frequency = 0;\n        this.channel2Trigger = false;\n        this.channel2LengthEnable = false;\n        this.channel3Play = false;\n        this.channel3Volume = 0;\n        this.channel3Frequency = 0;\n        this.channel3Trigger = false;\n        this.channel3LengthEnable = false;\n        this.channel4InitialVolume = 0;\n        this.channel4VolumeUp = false;\n        this.channel4EnvelopeDuration = 0;\n        this.channel4ShiftClockFrequency = 0;\n        this.channel4CounterStep = false;\n        this.channel4DivisionRatio = 0;\n        this.channel4Trigger = false;\n        this.channel4LengthEnable = false;\n        this.outputVinRight = false;\n        this.rightVolume = 0;\n        this.outputVinLeft = false;\n        this.leftVolume = 0;\n        this.channel1LeftEnable = false;\n        this.channel2LeftEnable = false;\n        this.channel3LeftEnable = false;\n        this.channel4LeftEnable = false;\n        this.channel1RightEnable = false;\n        this.channel2RightEnable = false;\n        this.channel3RightEnable = false;\n        this.channel4RightEnable = false;\n    }\n\n    genLFSR() {\n        const tmp = ((this.channel4LFSR & 0x2) >> 1) ^ (this.channel4LFSR & 0x1);\n        this.channel4LFSR = (tmp << 14) | (this.channel4LFSR >> 1);\n        if (this.channel4CounterStep) {\n            this.channel4LFSR = (this.channel4LFSR & 0x7fbf) | (tmp << 6);\n        }\n    }\n\n    updateLength() {\n        if (this.channel1LengthEnable) {\n            this.channel1LengthCounter--;\n            if (this.channel1LengthCounter == 0) {\n                this.channel1Enable = false;\n            }\n        }\n        if (this.channel2LengthEnable) {\n            this.channel2LengthCounter--;\n            if (this.channel2LengthCounter == 0) {\n                this.channel2Enable = false;\n            }\n        }\n        if (this.channel3LengthEnable) {\n            this.channel3LengthCounter--;\n            if (this.channel3LengthCounter == 0) {\n                this.channel3Enable = false;\n            }\n        }\n        if (this.channel4LengthEnable) {\n            this.channel4LengthCounter--;\n            if (this.channel4LengthCounter == 0) {\n                this.channel4Enable = false;\n            }\n        }\n    }\n\n    updateSweep() {\n        this.channel1SweepCounter--;\n        if (this.channel1SweepCounter <= 0) {\n            this.channel1SweepCounter = this.channel1SweepDuration;\n            if (this.channel1SweepDuration != 0 && this.channel1SweepEnable) {\n                let tmp = this.channel1SweepFrequency + (this.channel1SweepDown ? -1 : 1) * (this.channel1SweepFrequency >> this.channel1SweepShift);\n                if (tmp > 2047) {\n                    this.channel1Enable = false;\n                } else if (this.channel1SweepShift != 0) {\n                    this.channel1Frequency = this.channel1SweepFrequency = tmp;\n                    tmp = tmp + (this.channel1SweepDown ? -1 : 1) * (tmp >> this.channel1SweepShift);\n                    if (tmp > 2047) {\n                        this.channel1Enable = false;\n                    }\n                }\n            }\n        }\n    }\n\n    updateVolume() {\n        if (this.channel1Enable && this.channel1EnvelopeDuration != 0) {\n            this.channel1EnvelopeCounter--;\n            if (this.channel1EnvelopeCounter == 0) {\n                this.channel1EnvelopeCounter = this.channel1EnvelopeDuration;\n                if (this.channel1VolumeUp && this.channel1Volume < 15) {\n                    this.channel1Volume++;\n                }\n                if (!this.channel1VolumeUp && this.channel1Volume > 0) {\n                    this.channel1Volume--;\n                }\n            }\n        }\n        if (this.channel2Enable && this.channel2EnvelopeDuration != 0) {\n            this.channel2EnvelopeCounter--;\n            if (this.channel2EnvelopeCounter == 0) {\n                this.channel2EnvelopeCounter = this.channel2EnvelopeDuration;\n                if (this.channel2VolumeUp && this.channel2Volume < 15) {\n                    this.channel2Volume++;\n                }\n                if (!this.channel2VolumeUp && this.channel2Volume > 0) {\n                    this.channel2Volume--;\n                }\n            }\n        }\n        if (this.channel4Enable && this.channel4EnvelopeDuration != 0) {\n            this.channel4EnvelopeCounter--;\n            if (this.channel4EnvelopeCounter == 0) {\n                this.channel4EnvelopeCounter = this.channel4EnvelopeDuration;\n                if (this.channel4VolumeUp && this.channel4Volume < 15) {\n                    this.channel4Volume++;\n                }\n                if (!this.channel4VolumeUp && this.channel4Volume > 0) {\n                    this.channel4Volume--;\n                }\n            }\n        }\n    }\n\n    updateTrigger() {\n        if (this.channel1Trigger) {\n            this.channel1Trigger = false;\n            this.channel1Enable = true;\n            this.channel1FrequencyCounter = (2048 - this.channel1Frequency) * Sound.cyclesPerPulse;\n            if (this.channel1LengthCounter == 0) {\n                this.channel1LengthCounter = 64;\n            }\n            this.channel1SweepFrequency = this.channel1Frequency;\n            this.channel1SweepCounter = this.channel1SweepDuration;\n            this.channel1SweepEnable = this.channel1SweepDuration != 0 || this.channel1SweepShift != 0;\n            this.channel1EnvelopeCounter = this.channel1EnvelopeDuration;\n            this.channel1Volume = this.channel1InitialVolume;\n            this.channel1Index = 0;\n            if (this.channel1SweepShift > 0) {\n                const tmp = this.channel1SweepFrequency + (this.channel1SweepDown ? -1 : 1) * (this.channel1SweepFrequency >> this.channel1SweepShift);\n                if (tmp > 2047) {\n                    this.channel1Enable = false;\n                } else if (tmp >= 0) {\n                    this.channel1Frequency = this.channel1SweepFrequency = tmp;\n                }\n            }\n        }\n        if (this.channel2Trigger) {\n            this.channel2Trigger = false;\n            this.channel2Enable = true;\n            this.channel2FrequencyCounter = (2048 - this.channel2Frequency) * Sound.cyclesPerPulse;\n            if (this.channel2LengthCounter == 0) {\n                this.channel2LengthCounter = 64;\n            }\n            this.channel2EnvelopeCounter = this.channel2EnvelopeDuration;\n            this.channel2Volume = this.channel2InitialVolume;\n            this.channel2Index = 0;\n        }\n        if (this.channel3Trigger) {\n            this.channel3Trigger = false;\n            this.channel3Enable = true;\n            this.channel3FrequencyCounter = (2048 - this.channel3Frequency) * Sound.cyclesPerWave;\n            if (this.channel3LengthCounter == 0) {\n                this.channel3LengthCounter = 256;\n            }\n            this.channel3Index = 0;\n        }\n        if (this.channel4Trigger) {\n            this.channel4Trigger = false;\n            this.channel4Enable = true;\n            this.channel4FrequencyCounter = Sound.divisionRatios[this.channel4DivisionRatio] << this.channel4ShiftClockFrequency;\n            if (this.channel4LengthCounter == 0) {\n                this.channel4LengthCounter = 64;\n            }\n            this.channel4EnvelopeCounter = this.channel4EnvelopeDuration;\n            this.channel4Volume = this.channel4InitialVolume;\n            this.channel4LFSR = 0x7fff;\n        }\n    }\n\n    updateDAC() {\n        if (this.channel1Enable && this.channel1InitialVolume == 0 && !this.channel1VolumeUp) {\n            this.channel1Enable = false;\n        }\n        if (this.channel2Enable && this.channel2InitialVolume == 0 && !this.channel2VolumeUp) {\n            this.channel2Enable = false;\n        }\n        if (this.channel3Enable && !this.channel3Play) {\n            this.channel3Enable = false;\n        }\n        if (this.channel4Enable && this.channel4InitialVolume == 0 && !this.channel4VolumeUp) {\n            this.channel4Enable = false;\n        }\n    }\n\n    updateFrequency() {\n        let left = 0;\n        let right = 0;\n        if (this.channel1Enable) {\n            this.channel1FrequencyCounter -= Sound.cyclesPerSample;\n            while (this.channel1FrequencyCounter <= 0) {\n                this.channel1FrequencyCounter += (2048 - this.channel1Frequency) * Sound.cyclesPerPulse;\n                this.channel1Index = (this.channel1Index + 1) % 8;\n            }\n            if (this.channel1Volume != 0) {\n                const signal = Sound.pulseTable[this.channel1Duty][this.channel1Index] * this.channel1Volume / 15 * 2 - 1;\n                if (this.channel1LeftEnable) {\n                    left += signal;\n                }\n                if (this.channel1RightEnable) {\n                    right += signal;\n                }\n            }\n        }\n        if (this.channel2Enable) {\n            this.channel2FrequencyCounter -= Sound.cyclesPerSample;\n            while (this.channel2FrequencyCounter <= 0) {\n                this.channel2FrequencyCounter += (2048 - this.channel2Frequency) * Sound.cyclesPerPulse;\n                this.channel2Index = (this.channel2Index + 1) % 8;\n            }\n            if (this.channel2Volume != 0) {\n                const signal = Sound.pulseTable[this.channel2Duty][this.channel2Index] * this.channel2Volume / 15 * 2 - 1;\n                if (this.channel2LeftEnable) {\n                    left += signal;\n                }\n                if (this.channel2RightEnable) {\n                    right += signal;\n                }\n            }\n        }\n        if (this.channel3Enable) {\n            this.channel3FrequencyCounter -= Sound.cyclesPerSample;\n            while (this.channel3FrequencyCounter <= 0) {\n                this.channel3FrequencyCounter += (2048 - this.channel3Frequency) * Sound.cyclesPerWave;\n                this.channel3Index = (this.channel3Index + 1) % 32;\n            }\n            if (this.channel3Volume != 0) {\n                const signal = (this.channel3WaveTable[this.channel3Index] >> Sound.volumeShift[this.channel3Volume]) / 15 * 2 - 1;\n                if (this.channel3LeftEnable) {\n                    left += signal;\n                }\n                if (this.channel3RightEnable) {\n                    right += signal;\n                }\n            }\n        }\n        if (this.channel4Enable) {\n            this.channel4FrequencyCounter -= Sound.cyclesPerSample;\n            while (this.channel4FrequencyCounter <= 0) {\n                this.channel4FrequencyCounter += Sound.divisionRatios[this.channel4DivisionRatio] << this.channel4ShiftClockFrequency;\n                this.genLFSR();\n            }\n            if (this.channel4Volume != 0) {\n                const signal = (~this.channel4LFSR & 0b1) * this.channel4Volume / 15 * 2 - 1;\n                if (this.channel4LeftEnable) {\n                    left += signal;\n                }\n                if (this.channel4RightEnable) {\n                    right += signal;\n                }\n            }\n        }\n        left *= (this.leftVolume + 1) / 8;\n        right *= (this.rightVolume + 1) / 8;\n\n        this.bufferLeft[(this.cycles / Sound.cyclesPerSample) % Sound.bufferSamples] = left / Sound.channelCount;\n        this.bufferRight[(this.cycles / Sound.cyclesPerSample) % Sound.bufferSamples] = right / Sound.channelCount;\n    }\n\n    pushBuffer() {\n        /*\n        const now = Sound.ctx.currentTime;\n        const nowPlusDelay = now + Sound.latency;\n        this.nextPush = this.nextPush || nowPlusDelay;\n        if (this.nextPush >= now) {\n            const bufferSource = Sound.ctx.createBufferSource();\n            bufferSource.buffer = this.buffer;\n            bufferSource.connect(this.gainNode);\n            bufferSource.start(this.nextPush);\n            this.nextPush += Sound.bufferDuration;\n\n            this.buffer = Sound.ctx.createBuffer(2, Sound.bufferSamples, Sound.sampleFrequency);\n            this.bufferLeft = this.buffer.getChannelData(0);\n            this.bufferRight = this.buffer.getChannelData(1);\n        } else {\n            this.nextPush = nowPlusDelay;\n        }\n        */\n        this._messenger.postMessage({\n            msg: 'S',\n            payload: -1,\n            time: -1\n        });\n    }\n\n    cycle() {\n        this.cycles += Sound.cyclesPerCPUCycle;\n        if (this.soundEnable) {\n            if (this.cycles % Sound.cyclesPerSample == 0) {\n                this.updateTrigger();\n                this.updateDAC();\n                this.updateFrequency();\n            }\n            if (this.cycles % Sound.cyclesPerBuffer == 0) {\n                this.pushBuffer();\n            }\n            if (this.cycles % Sound.cyclesPerFrame == 0) {\n                this.frame++;\n                switch (this.frame % 8) {\n                    case 2:\n                    case 6:\n                        this.updateSweep();\n                    case 0:\n                    case 4:\n                        this.updateLength();\n                        break;\n                    case 7:\n                        this.updateVolume();\n                        break;\n                }\n            }\n        }\n    }\n}\nSound.frequency = 4194304;//4194304\nSound.cyclesPerCPUCycle = Sound.frequency / (4194304 / 4);//GameBoy.frequency;\nSound.pulseFrequency = Sound.frequency / 4;//1048576;\nSound.cyclesPerPulse = Sound.frequency / Sound.pulseFrequency;\nSound.waveFrequency = Sound.frequency / 2;//2097152;\nSound.cyclesPerWave = Sound.frequency / Sound.waveFrequency;\nSound.bufferSamples = Sound.frequency / 1024;//4096;\nSound.sampleFrequency = Sound.frequency / 64;//65536;\nSound.bufferDuration = Sound.bufferSamples / Sound.sampleFrequency;\nSound.latency = 0.125;\nSound.volume = 0.25;\nSound.frameFrequency = Sound.frequency / (8192);//   Sound.frequency / 8192;   //512;\nSound.cyclesPerFrame = Sound.frequency / Sound.frameFrequency;  // 8192\nSound.cyclesPerSample = Sound.frequency / Sound.sampleFrequency; // 64\nSound.cyclesPerBuffer = Sound.cyclesPerSample * Sound.bufferSamples; // 262144\nSound.channelCount = 4;\nSound.pulseTable = [\n    [0, 0, 0, 0, 0, 0, 0, 1],\n    [1, 0, 0, 0, 0, 0, 0, 1],\n    [1, 0, 0, 0, 0, 1, 1, 1],\n    [0, 1, 1, 1, 1, 1, 1, 0],\n];\nSound.volumeShift = [\n    4, 0, 1, 2,\n];\nSound.divisionRatios = [\n    2, 4, 8, 12, 16, 20, 24, 28,\n].map((value => value * Sound.cyclesPerCPUCycle));\n//Sound.ctx = new (window.AudioContext || window.webkitAudioContext)();\n\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/js/gb/sound.js?");
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Sound: () => (/* binding */ Sound)
+/* harmony export */ });
+class Sound {
+    constructor(gb, soundLeftSab, soundRightSab, fillSab, bufferLen) {
+        this.gb = gb;
+
+        this.channel3WaveTable = [
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+
+        this.cycles = 0;
+        this.frame = 0;
+
+        this.clearState();
+
+        this.soundEnable = false;
+
+        /*
+        this.gainNode = Sound.ctx.createGain();
+        this.gainNode.gain.value = Sound.volume;
+        this.gainNode.connect(Sound.ctx.destination);
+        */
+
+        /*
+        this.buffer = Sound.ctx.createBuffer(2, Sound.bufferSamples, Sound.sampleFrequency);
+        this.bufferLeft = this.buffer.getChannelData(0);
+        this.bufferRight = this.buffer.getChannelData(1);
+        */
+
+        this.bufferLeft = new Float32Array(soundLeftSab);
+        this.bufferRight = new Float32Array(soundRightSab);
+
+        this.filled = new Int32Array(fillSab);
+        this.bufferLen = bufferLen;
+        this.genCount = 0;
+
+        this._messenger = null;
+    }
+
+    set messenger(value) {
+        this._messenger = value;
+    }
+
+    get nr10() {
+        return 0x80 | (this.channel1SweepDuration << 4) | (this.channel1SweepDown << 3) | this.channel1SweepShift;
+    }
+
+    set nr10(value) {
+        this.channel1SweepDuration = (value & 0x70) >> 4;
+        this.channel1SweepDown = (value & 0x8) != 0;
+        this.channel1SweepShift = value & 0x7;
+    }
+
+    get nr11() {
+        return 0x3f | (this.channel1Duty << 6);
+    }
+
+    set nr11(value) {
+        this.channel1Duty = (value & 0xc0) >> 6;
+        this.channel1LengthCounter = 64 - (value & 0x3f);
+    }
+
+    get nr12() {
+        return (this.channel1InitialVolume << 4) | (this.channel1VolumeUp << 3) | this.channel1EnvelopeDuration;
+    }
+
+    set nr12(value) {
+        this.channel1InitialVolume = (value & 0xf0) >> 4;
+        this.channel1VolumeUp = (value & 0x8) != 0;
+        this.channel1EnvelopeDuration = value & 0x7;
+    }
+
+    get nr13() {
+        return 0xff;
+    }
+
+    set nr13(value) {
+        this.channel1Frequency = (this.channel1Frequency & 0x700) | value;
+    }
+
+    get nr14() {
+        return 0xbf | (this.channel1LengthEnable << 6);
+    }
+
+    set nr14(value) {
+        this.channel1Trigger = (value & 0x80) != 0;
+        this.channel1LengthEnable = (value & 0x40) != 0;
+        this.channel1Frequency = ((value & 0x7) << 8) | (this.channel1Frequency & 0xff);
+    }
+
+    get nr21() {
+        return 0x3f | (this.channel2Duty << 6);
+    }
+
+    set nr21(value) {
+        this.channel2Duty = (value & 0xc0) >> 6;
+        this.channel2LengthCounter = 64 - (value & 0x3f);
+    }
+
+    get nr22() {
+        return (this.channel2InitialVolume << 4) | (this.channel2VolumeUp << 3) | this.channel2EnvelopeDuration;
+    }
+
+    set nr22(value) {
+        this.channel2InitialVolume = (value & 0xf0) >> 4;
+        this.channel2VolumeUp = (value & 0x8) != 0;
+        this.channel2EnvelopeDuration = value & 0x7;
+    }
+
+    get nr23() {
+        return 0xff;
+    }
+
+    set nr23(value) {
+        this.channel2Frequency = (this.channel2Frequency & 0x700) | value;
+    }
+
+    get nr24() {
+        return 0xbf | (this.channel2LengthEnable << 6);
+    }
+
+    set nr24(value) {
+        this.channel2Trigger = (value & 0x80) != 0;
+        this.channel2LengthEnable = (value & 0x40) != 0;
+        this.channel2Frequency = ((value & 0x7) << 8) | (this.channel2Frequency & 0xff);
+    }
+
+    get nr30() {
+        return 0x7f | (this.channel3Play << 7);
+    }
+
+    set nr30(value) {
+        this.channel3Play = (value & 0x80) != 0;
+    }
+
+    get nr31() {
+        return 0xff;
+    }
+
+    set nr31(value) {
+        this.channel3LengthCounter = 256 - value;
+    }
+
+    get nr32() {
+        return 0x9f | (this.channel3Volume << 5);
+    }
+
+    set nr32(value) {
+        this.channel3Volume = (value & 0x60) >> 5;
+    }
+
+    get nr33() {
+        return 0xff;
+    }
+
+    set nr33(value) {
+        this.channel3Frequency = (this.channel3Frequency & 0x700) | value;
+    }
+
+    get nr34() {
+        return 0xbf | (this.channel3LengthEnable << 6);
+    }
+
+    set nr34(value) {
+        this.channel3Trigger = (value & 0x80) != 0;
+        this.channel3LengthEnable = (value & 0x40) != 0;
+        this.channel3Frequency = ((value & 0x7) << 8) | (this.channel3Frequency & 0xff);
+    }
+
+    get nr41() {
+        return 0xff;
+    }
+
+    set nr41(value) {
+        this.channel4LengthCounter = 64 - (value & 0x3f);
+    }
+
+    get nr42() {
+        return (this.channel4InitialVolume << 4) | (this.channel4VolumeUp << 3) | this.channel4EnvelopeDuration;
+    }
+
+    set nr42(value) {
+        this.channel4InitialVolume = (value & 0xf0) >> 4;
+        this.channel4VolumeUp = (value & 0x8) != 0;
+        this.channel4EnvelopeDuration = value & 0x7;
+    }
+
+    get nr43() {
+        return (this.channel4ShiftClockFrequency << 4) | (this.channel4CounterStep << 3) | this.channel4DivisionRatio;
+    }
+
+    set nr43(value) {
+        this.channel4ShiftClockFrequency = (value & 0xf0) >> 4;
+        this.channel4CounterStep = (value & 0x8) != 0;
+        this.channel4DivisionRatio = value & 0x7;
+    }
+
+    get nr44() {
+        return 0xbf | (this.channel4LengthEnable << 6);
+    }
+
+    set nr44(value) {
+        this.channel4Trigger = (value & 0x80) != 0;
+        this.channel4LengthEnable = (value & 0x40) != 0;
+    }
+
+    get nr50() {
+        return (this.outputVinRight << 7) | (this.rightVolume << 4) | (this.outputVinLeft << 3) | this.leftVolume;
+    }
+
+    set nr50(value) {
+        this.outputVinRight = (value & 0x80) != 0;
+        this.rightVolume = (value & 0x70) >> 4;
+        this.outputVinLeft = (value & 0x8) != 0;
+        this.leftVolume = value & 0x7;
+    }
+
+    get nr51() {
+        return (this.channel4RightEnable << 7) | (this.channel3RightEnable << 6) | (this.channel2RightEnable << 5) | (this.channel1RightEnable << 4) | (this.channel4LeftEnable << 3) | (this.channel3LeftEnable << 2) | (this.channel2LeftEnable << 1) | this.channel1LeftEnable;
+    }
+
+    set nr51(value) {
+        this.channel4RightEnable = (value & 0x80) != 0;
+        this.channel3RightEnable = (value & 0x40) != 0;
+        this.channel2RightEnable = (value & 0x20) != 0;
+        this.channel1RightEnable = (value & 0x10) != 0;
+        this.channel4LeftEnable = (value & 0x8) != 0;
+        this.channel3LeftEnable = (value & 0x4) != 0;
+        this.channel2LeftEnable = (value & 0x2) != 0;
+        this.channel1LeftEnable = (value & 0x1) != 0;
+    }
+
+    get nr52() {
+        return 0x70 | (this.soundEnable << 7) | (this.channel4Enable << 3) | (this.channel3Enable << 2) | (this.channel2Enable << 1) | this.channel1Enable;
+    }
+
+    set nr52(value) {
+        this.soundEnable = (value & 0x80) != 0;
+        if (!this.soundEnable) {
+            this.clearState();
+        }
+    }
+
+    readAddress(address) {
+        if (address <= 0x2f) {
+            switch (address) {
+                case 0x10: return this.nr10;
+                case 0x11: return this.nr11;
+                case 0x12: return this.nr12;
+                case 0x13: return this.nr13;
+                case 0x14: return this.nr14;
+                case 0x16: return this.nr21;
+                case 0x17: return this.nr22;
+                case 0x18: return this.nr23;
+                case 0x19: return this.nr24;
+                case 0x1a: return this.nr30;
+                case 0x1b: return this.nr31;
+                case 0x1c: return this.nr32;
+                case 0x1d: return this.nr33;
+                case 0x1e: return this.nr34;
+                case 0x20: return this.nr41;
+                case 0x21: return this.nr42;
+                case 0x22: return this.nr43;
+                case 0x23: return this.nr44;
+                case 0x24: return this.nr50;
+                case 0x25: return this.nr51;
+                case 0x26: return this.nr52;
+                default: return 0xff;
+            }
+        } else {
+            return this.readWave(address & 0xf);
+        }
+    }
+
+    writeAddress(address, value) {
+        if (this.soundEnable) {
+            if (address <= 0x2f) {
+                switch (address) {
+                    case 0x10: this.nr10 = value; break;
+                    case 0x11: this.nr11 = value; break;
+                    case 0x12: this.nr12 = value; break;
+                    case 0x13: this.nr13 = value; break;
+                    case 0x14: this.nr14 = value; break;
+                    case 0x16: this.nr21 = value; break;
+                    case 0x17: this.nr22 = value; break;
+                    case 0x18: this.nr23 = value; break;
+                    case 0x19: this.nr24 = value; break;
+                    case 0x1a: this.nr30 = value; break;
+                    case 0x1b: this.nr31 = value; break;
+                    case 0x1c: this.nr32 = value; break;
+                    case 0x1d: this.nr33 = value; break;
+                    case 0x1e: this.nr34 = value; break;
+                    case 0x20: this.nr41 = value; break;
+                    case 0x21: this.nr42 = value; break;
+                    case 0x22: this.nr43 = value; break;
+                    case 0x23: this.nr44 = value; break;
+                    case 0x24: this.nr50 = value; break;
+                    case 0x25: this.nr51 = value; break;
+                    case 0x26: this.nr52 = value; break;
+                    default: break;
+                }
+            } else {
+                this.writeWave(address & 0xf, value);
+            }
+        } else if (address == 0x26) {
+            this.nr52 = value;
+        }
+    }
+
+    readWave(address) {
+        return (this.channel3WaveTable[address * 2] << 4) | this.channel3WaveTable[address * 2 + 1];
+    }
+
+    writeWave(address, value) {
+        this.channel3WaveTable[address * 2] = (value & 0xf0) >> 4;
+        this.channel3WaveTable[address * 2 + 1] = value & 0xf;
+    }
+
+    clearState() {
+        this.frame = 0;
+        this.channel1Enable = false;
+        this.channel2Enable = false;
+        this.channel3Enable = false;
+        this.channel4Enable = false;
+        this.channel1SweepDuration = 0;
+        this.channel1SweepDown = false;
+        this.channel1SweepShift = 0;
+        this.channel1SweepEnable = false;
+        this.channel1Duty = 0;
+        this.channel1InitialVolume = 0;
+        this.channel1VolumeUp = false;
+        this.channel1EnvelopeDuration = 0;
+        this.channel1Frequency = 0;
+        this.channel1Trigger = false;
+        this.channel1LengthEnable = false;
+        this.channel2Duty = 0;
+        this.channel2InitialVolume = 0;
+        this.channel2VolumeUp = false;
+        this.channel2EnvelopeDuration = 0;
+        this.channel2Frequency = 0;
+        this.channel2Trigger = false;
+        this.channel2LengthEnable = false;
+        this.channel3Play = false;
+        this.channel3Volume = 0;
+        this.channel3Frequency = 0;
+        this.channel3Trigger = false;
+        this.channel3LengthEnable = false;
+        this.channel4InitialVolume = 0;
+        this.channel4VolumeUp = false;
+        this.channel4EnvelopeDuration = 0;
+        this.channel4ShiftClockFrequency = 0;
+        this.channel4CounterStep = false;
+        this.channel4DivisionRatio = 0;
+        this.channel4Trigger = false;
+        this.channel4LengthEnable = false;
+        this.outputVinRight = false;
+        this.rightVolume = 0;
+        this.outputVinLeft = false;
+        this.leftVolume = 0;
+        this.channel1LeftEnable = false;
+        this.channel2LeftEnable = false;
+        this.channel3LeftEnable = false;
+        this.channel4LeftEnable = false;
+        this.channel1RightEnable = false;
+        this.channel2RightEnable = false;
+        this.channel3RightEnable = false;
+        this.channel4RightEnable = false;
+    }
+
+    genLFSR() {
+
+        if(this.channel4CounterStep) {
+            this.genCount++;
+            if(this.genCount > 127 || this.genCount == 1) {
+                this.channel4LFSR = 0x7fff;
+                return;
+            }
+        }
+
+        const tmp = ((this.channel4LFSR & 0x2) >> 1) ^ (this.channel4LFSR & 0x1);
+        this.channel4LFSR = (tmp << 14) | (this.channel4LFSR >> 1);
+        if (this.channel4CounterStep) {
+            this.channel4LFSR = (this.channel4LFSR & 0x7fbf) | (tmp << 6);
+        }
+    }
+
+    updateLength() {
+        if (this.channel1LengthEnable) {
+            this.channel1LengthCounter--;
+            if (this.channel1LengthCounter == 0) {
+                this.channel1Enable = false;
+            }
+        }
+        if (this.channel2LengthEnable) {
+            this.channel2LengthCounter--;
+            if (this.channel2LengthCounter == 0) {
+                this.channel2Enable = false;
+            }
+        }
+        if (this.channel3LengthEnable) {
+            this.channel3LengthCounter--;
+            if (this.channel3LengthCounter == 0) {
+                this.channel3Enable = false;
+            }
+        }
+        if (this.channel4LengthEnable) {
+            this.channel4LengthCounter--;
+            if (this.channel4LengthCounter == 0) {
+                this.channel4Enable = false;
+            }
+        }
+    }
+
+    updateSweep() {
+        this.channel1SweepCounter--;
+        if (this.channel1SweepCounter <= 0) {
+            this.channel1SweepCounter = this.channel1SweepDuration;
+            if (this.channel1SweepDuration != 0 && this.channel1SweepEnable) {
+                let tmp = this.channel1SweepFrequency + (this.channel1SweepDown ? -1 : 1) * (this.channel1SweepFrequency >> this.channel1SweepShift);
+                if (tmp > 2047) {
+                    this.channel1Enable = false;
+                } else if (this.channel1SweepShift != 0) {
+                    this.channel1Frequency = this.channel1SweepFrequency = tmp;
+                    tmp = tmp + (this.channel1SweepDown ? -1 : 1) * (tmp >> this.channel1SweepShift);
+                    if (tmp > 2047) {
+                        this.channel1Enable = false;
+                    }
+                }
+            }
+        }
+    }
+
+    updateVolume() {
+        if (this.channel1Enable && this.channel1EnvelopeDuration != 0) {
+            this.channel1EnvelopeCounter--;
+            if (this.channel1EnvelopeCounter == 0) {
+                this.channel1EnvelopeCounter = this.channel1EnvelopeDuration;
+                if (this.channel1VolumeUp && this.channel1Volume < 15) {
+                    this.channel1Volume++;
+                }
+                if (!this.channel1VolumeUp && this.channel1Volume > 0) {
+                    this.channel1Volume--;
+                }
+            }
+        }
+        if (this.channel2Enable && this.channel2EnvelopeDuration != 0) {
+            this.channel2EnvelopeCounter--;
+            if (this.channel2EnvelopeCounter == 0) {
+                this.channel2EnvelopeCounter = this.channel2EnvelopeDuration;
+                if (this.channel2VolumeUp && this.channel2Volume < 15) {
+                    this.channel2Volume++;
+                }
+                if (!this.channel2VolumeUp && this.channel2Volume > 0) {
+                    this.channel2Volume--;
+                }
+            }
+        }
+        if (this.channel4Enable && this.channel4EnvelopeDuration != 0) {
+            this.channel4EnvelopeCounter--;
+            if (this.channel4EnvelopeCounter == 0) {
+                this.channel4EnvelopeCounter = this.channel4EnvelopeDuration;
+                if (this.channel4VolumeUp && this.channel4Volume < 15) {
+                    this.channel4Volume++;
+                }
+                if (!this.channel4VolumeUp && this.channel4Volume > 0) {
+                    this.channel4Volume--;
+                }
+            }
+        }
+    }
+
+    updateTrigger() {
+        if (this.channel1Trigger) {
+            this.channel1Trigger = false;
+            this.channel1Enable = true;
+            this.channel1FrequencyCounter = (2048 - this.channel1Frequency) * Sound.cyclesPerPulse;
+            if (this.channel1LengthCounter == 0) {
+                this.channel1LengthCounter = 64;
+            }
+            this.channel1SweepFrequency = this.channel1Frequency;
+            this.channel1SweepCounter = this.channel1SweepDuration;
+            this.channel1SweepEnable = this.channel1SweepDuration != 0 || this.channel1SweepShift != 0;
+            this.channel1EnvelopeCounter = this.channel1EnvelopeDuration;
+            this.channel1Volume = this.channel1InitialVolume;
+            this.channel1Index = 0;
+            if (this.channel1SweepShift > 0) {
+                const tmp = this.channel1SweepFrequency + (this.channel1SweepDown ? -1 : 1) * (this.channel1SweepFrequency >> this.channel1SweepShift);
+                if (tmp > 2047) {
+                    this.channel1Enable = false;
+                } else if (tmp >= 0) {
+                    this.channel1Frequency = this.channel1SweepFrequency = tmp;
+                }
+            }
+        }
+        if (this.channel2Trigger) {
+            this.channel2Trigger = false;
+            this.channel2Enable = true;
+            this.channel2FrequencyCounter = (2048 - this.channel2Frequency) * Sound.cyclesPerPulse;
+            if (this.channel2LengthCounter == 0) {
+                this.channel2LengthCounter = 64;
+            }
+            this.channel2EnvelopeCounter = this.channel2EnvelopeDuration;
+            this.channel2Volume = this.channel2InitialVolume;
+            this.channel2Index = 0;
+        }
+        if (this.channel3Trigger) {
+            this.channel3Trigger = false;
+            this.channel3Enable = true;
+            this.channel3FrequencyCounter = (2048 - this.channel3Frequency) * Sound.cyclesPerWave;
+            if (this.channel3LengthCounter == 0) {
+                this.channel3LengthCounter = 256;
+            }
+            this.channel3Index = 0;
+        }
+        if (this.channel4Trigger) {
+            this.channel4Trigger = false;
+            this.channel4Enable = true;
+            this.channel4FrequencyCounter = Sound.divisionRatios[this.channel4DivisionRatio] << this.channel4ShiftClockFrequency;
+            if (this.channel4LengthCounter == 0) {
+                this.channel4LengthCounter = 64;
+            }
+            this.channel4EnvelopeCounter = this.channel4EnvelopeDuration;
+            this.channel4Volume = this.channel4InitialVolume;
+            this.channel4LFSR = 0x7fff;
+            this.genCount = 0;
+        }
+    }
+
+    updateDAC() {
+        if (this.channel1Enable && this.channel1InitialVolume == 0 && !this.channel1VolumeUp) {
+            this.channel1Enable = false;
+        }
+        if (this.channel2Enable && this.channel2InitialVolume == 0 && !this.channel2VolumeUp) {
+            this.channel2Enable = false;
+        }
+        if (this.channel3Enable && !this.channel3Play) {
+            this.channel3Enable = false;
+        }
+        if (this.channel4Enable && this.channel4InitialVolume == 0 && !this.channel4VolumeUp) {
+            this.channel4Enable = false;
+        }
+    }
+
+    updateFrequency() {
+        let left = 0;
+        let right = 0;
+        if (this.channel1Enable) {
+            this.channel1FrequencyCounter -= Sound.cyclesPerSample;
+            while (this.channel1FrequencyCounter <= 0) {
+                this.channel1FrequencyCounter += (2048 - this.channel1Frequency) * Sound.cyclesPerPulse;
+                this.channel1Index = (this.channel1Index + 1) % 8;
+            }
+            if (this.channel1Volume != 0) {
+                const signal = Sound.pulseTable[this.channel1Duty][this.channel1Index] * this.channel1Volume / 15;
+                if (this.channel1LeftEnable) {
+                    left += signal;
+                }
+                if (this.channel1RightEnable) {
+                    right += signal;
+                }
+            }
+        }
+        if (this.channel2Enable) {
+            this.channel2FrequencyCounter -= Sound.cyclesPerSample;
+            while (this.channel2FrequencyCounter <= 0) {
+                this.channel2FrequencyCounter += (2048 - this.channel2Frequency) * Sound.cyclesPerPulse;
+                this.channel2Index = (this.channel2Index + 1) % 8;
+            }
+            if (this.channel2Volume != 0) {
+                const signal = Sound.pulseTable[this.channel2Duty][this.channel2Index] * this.channel2Volume / 15;
+                if (this.channel2LeftEnable) {
+                    left += signal;
+                }
+                if (this.channel2RightEnable) {
+                    right += signal;
+                }
+            }
+        }
+        if (this.channel3Enable) {
+            this.channel3FrequencyCounter -= Sound.cyclesPerSample;
+            while (this.channel3FrequencyCounter <= 0) {
+                this.channel3FrequencyCounter += (2048 - this.channel3Frequency) * Sound.cyclesPerWave;
+                this.channel3Index = (this.channel3Index + 1) % 32;
+            }
+            if (this.channel3Volume != 0) {
+                const signal = (this.channel3WaveTable[this.channel3Index] >> Sound.volumeShift[this.channel3Volume]) / 15;
+                if (this.channel3LeftEnable) {
+                    left += signal;
+                }
+                if (this.channel3RightEnable) {
+                    right += signal;
+                }
+            }
+        }
+        if (this.channel4Enable) {
+            this.channel4FrequencyCounter -= Sound.cyclesPerSample;
+            while (this.channel4FrequencyCounter <= 0) {
+                this.channel4FrequencyCounter += Sound.divisionRatios[this.channel4DivisionRatio] << this.channel4ShiftClockFrequency;
+                this.genLFSR();
+            }
+
+            if(this.channel4CounterStep && this.genCount > 127) {
+                this.genCount = 0;
+            }
+
+            if (this.channel4Volume != 0) {
+                const signal = (~this.channel4LFSR & 0b1) * this.channel4Volume / 15;
+                if (this.channel4LeftEnable) {
+                    left += signal;
+                }
+                if (this.channel4RightEnable) {
+                    right += signal;
+                }
+            }
+        }
+        left *= (this.leftVolume + 1) / 8;
+        right *= (this.rightVolume + 1) / 8;
+
+        const idx = (this.cycles / Sound.cyclesPerSample) % this.bufferLen;
+        this.bufferLeft[idx] = left / Sound.channelCount;
+        this.bufferRight[idx] = right / Sound.channelCount;
+  
+        if(((this.cycles / Sound.cyclesPerSample) % Sound.bufferSamples) == (Sound.bufferSamples - 1)) {
+            Atomics.add(this.filled, 0, Sound.bufferSamples);
+        }
+    }
+
+    pushBuffer() {
+        /*
+        const now = Sound.ctx.currentTime;
+        const nowPlusDelay = now + Sound.latency;
+        this.nextPush = this.nextPush || nowPlusDelay;
+        if (this.nextPush >= now) {
+            const bufferSource = Sound.ctx.createBufferSource();
+            bufferSource.buffer = this.buffer;
+            bufferSource.connect(this.gainNode);
+            bufferSource.start(this.nextPush);
+            this.nextPush += Sound.bufferDuration;
+
+            this.buffer = Sound.ctx.createBuffer(2, Sound.bufferSamples, Sound.sampleFrequency);
+            this.bufferLeft = this.buffer.getChannelData(0);
+            this.bufferRight = this.buffer.getChannelData(1);
+        } else {
+            this.nextPush = nowPlusDelay;
+        }
+        */
+        this._messenger.postMessage({
+            msg: 'S',
+            payload: -1,
+            time: -1
+        });
+    }
+
+    cycle() {
+        this.cycles += Sound.cyclesPerCPUCycle;
+        if (this.soundEnable) {
+            if (this.cycles % Sound.cyclesPerSample == 0) {
+                this.updateTrigger();
+                this.updateDAC();
+                this.updateFrequency();
+            }
+            if (this.cycles % Sound.cyclesPerFrame == 0) {
+                this.frame++;
+                switch (this.frame % 8) {
+                    case 2:
+                    case 6:
+                        this.updateSweep();
+                    case 0:
+                    case 4:
+                        this.updateLength();
+                        break;
+                    case 7:
+                        this.updateVolume();
+                        break;
+                }
+            }
+        }
+    }
+}
+Sound.frequency = 4194304;//4194304
+Sound.cyclesPerCPUCycle = Sound.frequency / (4194304 / 4);//GameBoy.frequency;
+Sound.pulseFrequency = Sound.frequency / 4;//1048576;
+Sound.cyclesPerPulse = Sound.frequency / Sound.pulseFrequency;
+Sound.waveFrequency = Sound.frequency / 2;//2097152;
+Sound.cyclesPerWave = Sound.frequency / Sound.waveFrequency;
+Sound.bufferSamples = Sound.frequency / 1024;//4096;
+Sound.sampleFrequency = Sound.frequency / 64;//65536;
+Sound.bufferDuration = Sound.bufferSamples / Sound.sampleFrequency;
+Sound.latency = 0.125;
+Sound.volume = 0.25;
+Sound.frameFrequency = Sound.frequency / (8192);//   Sound.frequency / 8192;   //512;
+Sound.cyclesPerFrame = Sound.frequency / Sound.frameFrequency;  // 8192
+Sound.cyclesPerSample = Sound.frequency / Sound.sampleFrequency; // 64
+Sound.cyclesPerBuffer = Sound.cyclesPerSample * Sound.bufferSamples; // 262144
+Sound.channelCount = 4;
+Sound.pulseTable = [
+    [0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 1, 1, 1],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+];
+Sound.volumeShift = [
+    4, 0, 1, 2,
+];
+Sound.divisionRatios = [
+    2, 4, 8, 12, 16, 20, 24, 28,
+].map((value => value * Sound.cyclesPerCPUCycle));
+//Sound.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
 
 /***/ }),
 
@@ -96,7 +3353,103 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
   \*******************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   Timer: () => (/* binding */ Timer)\n/* harmony export */ });\n/* harmony import */ var _cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./cpu.js */ \"./public/js/gb/cpu.js\");\n\n\nclass Timer {\n    constructor(gb) {\n        this.gb = gb;\n\n        this._div = 0;\n        this._tima = 0;\n        this._tma = 0;\n        this.timerEnable = false;\n        this.clockSelect = 0;\n\n        this.overflow = false;\n    }\n\n    get div() {\n        return this._div >> 8;\n    }\n\n    set div(value) {\n        if (this.tacBit) {\n            this.timaIncrement();\n        }\n        this._div = 0;\n    }\n\n    get tima() {\n        return this._tima;\n    }\n\n    set tima(value) {\n        if (!this.overflow) {\n            this._tima = value;\n        }\n    }\n\n    get tma() {\n        return this._tma;\n    }\n\n    set tma(value) {\n        this._tma = value;\n        if (this.overflow) {\n            this._tima = this._tma;\n        }\n    }\n\n    get tac() {\n        return 0xf8 | (this.timerEnable << 2) | this.clockSelect;\n    }\n\n    set tac(value) {\n        const oldBit = this.timerEnable && this.tacBit;\n        this.timerEnable = (value & 0x4) != 0;\n        this.clockSelect = value & 0x3;\n        const newBit = this.timerEnable && this.tacBit;\n        if (oldBit && !newBit) {\n            this.timaIncrement();\n        }\n    }\n\n    get tacBit() {\n        return (this._div & Timer.tacBits[this.clockSelect]) != 0;\n    }\n\n    timaIncrement() {\n        this._tima = (this._tima + 1) & 0xff;\n        this.overflow = this._tima == 0;\n    }\n\n    cycle() {\n        if (this.overflow) {\n            this._div = (this._div + Timer.cyclesPerCPUCycle) & 0xffff;\n            this.overflow = false;\n            this._tima = this._tma;\n            this.gb.requestInterrupt(_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.timerInterrupt);\n        } else if (this.timerEnable && this.tacBit) {\n            this._div = (this._div + Timer.cyclesPerCPUCycle) & 0xffff;\n            if (!this.tacBit) {\n                this.timaIncrement();\n            }\n        } else {\n            this._div = (this._div + Timer.cyclesPerCPUCycle) & 0xffff;\n        }\n    }\n}\nTimer.tacBits = [\n    0x200, 0x8, 0x20, 0x80,\n];\nTimer.frequency = 4194304;\nTimer.cyclesPerCPUCycle = Timer.frequency / (4194304 / 4);//GameBoy.frequency;\n\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/js/gb/timer.js?");
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Timer: () => (/* binding */ Timer)
+/* harmony export */ });
+/* harmony import */ var _cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./cpu.js */ "./public/js/gb/cpu.js");
+
+
+class Timer {
+    constructor(gb) {
+        this.gb = gb;
+
+        this._div = 0;
+        this._tima = 0;
+        this._tma = 0;
+        this.timerEnable = false;
+        this.clockSelect = 0;
+
+        this.overflow = false;
+    }
+
+    get div() {
+        return this._div >> 8;
+    }
+
+    set div(value) {
+        if (this.tacBit) {
+            this.timaIncrement();
+        }
+        this._div = 0;
+    }
+
+    get tima() {
+        return this._tima;
+    }
+
+    set tima(value) {
+        if (!this.overflow) {
+            this._tima = value;
+        }
+    }
+
+    get tma() {
+        return this._tma;
+    }
+
+    set tma(value) {
+        this._tma = value;
+        if (this.overflow) {
+            this._tima = this._tma;
+        }
+    }
+
+    get tac() {
+        return 0xf8 | (this.timerEnable << 2) | this.clockSelect;
+    }
+
+    set tac(value) {
+        const oldBit = this.timerEnable && this.tacBit;
+        this.timerEnable = (value & 0x4) != 0;
+        this.clockSelect = value & 0x3;
+        const newBit = this.timerEnable && this.tacBit;
+        if (oldBit && !newBit) {
+            this.timaIncrement();
+        }
+    }
+
+    get tacBit() {
+        return (this._div & Timer.tacBits[this.clockSelect]) != 0;
+    }
+
+    timaIncrement() {
+        this._tima = (this._tima + 1) & 0xff;
+        this.overflow = this._tima == 0;
+    }
+
+    cycle() {
+        if (this.overflow) {
+            this._div = (this._div + Timer.cyclesPerCPUCycle) & 0xffff;
+            this.overflow = false;
+            this._tima = this._tma;
+            this.gb.requestInterrupt(_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.timerInterrupt);
+        } else if (this.timerEnable && this.tacBit) {
+            this._div = (this._div + Timer.cyclesPerCPUCycle) & 0xffff;
+            if (!this.tacBit) {
+                this.timaIncrement();
+            }
+        } else {
+            this._div = (this._div + Timer.cyclesPerCPUCycle) & 0xffff;
+        }
+    }
+}
+Timer.tacBits = [
+    0x200, 0x8, 0x20, 0x80,
+];
+Timer.frequency = 4194304;
+Timer.cyclesPerCPUCycle = Timer.frequency / (4194304 / 4);//GameBoy.frequency;
+
 
 /***/ }),
 
@@ -106,7 +3459,526 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
   \********************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   OrderLock: () => (/* binding */ OrderLock)\n/* harmony export */ });\nconst locked = 1;\nconst unlocked = 0;\n\n/*\n   INT_SIZE should be 2 to the power of n\n   to use bitwise operation as modular operation.\n*/\nconst INT_SIZE = 16;\nconst BIT_MOD = INT_SIZE - 1; \n\nclass OrderLock {\n  /**\n   * Instantiate Mutex.\n   * If opt_sab is provided, the mutex will use it as a backing array.\n   * @param {SharedArrayBuffer} opt_sab Optional SharedArrayBuffer.\n   */\n  /*\n  constructor(opt_sab, opt_queue_sab, opt_front, opt_end, opt_reserved) {\n    this._sab = opt_sab || new SharedArrayBuffer(4);\n    this._mu = new Int32Array(this._sab);\n\n    this._queue_sab = opt_queue_sab || new SharedArrayBuffer(4*(INT_SIZE));\n    this._queue = new Int32Array(this._queue_sab);\n\n    this._front_sab = opt_front || new SharedArrayBuffer(4);\n    this._end_sab = opt_end || new SharedArrayBuffer(4);\n\n    this._front = new Int32Array(this._front_sab);\n    this._end = new Int32Array(this._end_sab);\n\n    this._reserved_sab = opt_reserved || new SharedArrayBuffer(4*(INT_SIZE));\n    this._reserved = new Int32Array(this._reserved_sab);\n    Atomics.store(this._reserved, 0 , -1);\n  }\n  */\n\n  constructor(opt_sab, opt_order, opt_main, opt_worker, opt_dsab, opt_enter_order, opt_queue_sab, opt_front, opt_end, opt_reserved) {\n    this._sab = opt_sab || new SharedArrayBuffer(4);\n    this._mu = new Int32Array(this._sab);\n\n    this._order_buffer = opt_order || new SharedArrayBuffer(4*(INT_SIZE));\n    this._order = new Int32Array(this._order_buffer);\n    this._order[0] = 1;\n\n    this._main_buffer = opt_main || new SharedArrayBuffer(4*(INT_SIZE));\n    this._main = new Int32Array(this._main_buffer);\n\n    this._worker_buffer = opt_worker || new SharedArrayBuffer(4*(INT_SIZE));\n    this._worker = new Int32Array(this._worker_buffer);\n\n    this._dsab = opt_dsab || new SharedArrayBuffer(4);\n    this._door = new Int32Array(this._dsab);\n\n    this._enter_order_buffer = opt_enter_order || new SharedArrayBuffer(4*(INT_SIZE));\n    this._enter_order = new Int32Array(this._enter_order_buffer);\n    this._enter_order[0] = 1;\n\n    this._queue_sab = opt_queue_sab || new SharedArrayBuffer(4*(INT_SIZE));\n    this._queue = new Int32Array(this._queue_sab);\n\n    this._front_sab = opt_front || new SharedArrayBuffer(4);\n    this._end_sab = opt_end || new SharedArrayBuffer(4);\n\n    this._front = new Int32Array(this._front_sab);\n    this._end = new Int32Array(this._end_sab);\n\n    this._reserved_sab = opt_reserved || new SharedArrayBuffer(4*(INT_SIZE));\n    this._reserved = new Int32Array(this._reserved_sab);\n    this._reserved[0] = -1;\n  }\n\n  /**\n   * Instantiate a Mutex connected to the given one.\n   * @param {OrderLock} mu the other Mutex.\n   */\n  static connect(mu) {\n    //return new OrderLock(mu._sab, mu._queue_sab, mu._front_sab, mu._end_sab, mu._reserved_sab);\n    return new OrderLock(mu._sab, mu._order_buffer, mu._main_buffer, mu._worker_buffer, mu._dsab, \n      mu._enter_order_buffer, mu._queue_sab, mu._front_sab, mu._end_sab, mu._reserved_sab);\n  }\n\n\n  //---------------------------------------------------------\n\n  lock() {\n    const enterId = this.getId();\n    for(;;) {\n        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n          // get lock\n          return enterId;\n        }\n        Atomics.wait(this._mu, 0, locked);\n    }\n  }\n\n  spinLock() {\n    const enterId = this.getId();\n    for(;;) {\n        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n          // get lock\n          return enterId;\n        }\n        //Atomics.wait(this._mu, 0, locked);\n    }\n  }\n\n  getId() {\n    const enterId = Atomics.add(this._order, 0, 1) % INT_SIZE;\n    Atomics.and(this._order, 0, BIT_MOD);\n    return enterId;\n  }\n\n  unLock() { \n    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {\n        throw new Error(\"Mutex is in inconsistent state: unlock on unlocked Mutex.\");\n    }\n    Atomics.notify(this._mu, 0, 1);\n  }\n  /**\n   *  this._worker[0] is wait flag.\n   */\n  getWaitLock() {\n    console.log(\"emul [WANT LOCK]\");\n    for(;;) {\n      if(Atomics.load(this._main, 0) === 0) {    // is the other reserved?\n        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n          return;\n        }\n      }\n      Atomics.store(this._worker, 0, 1);\n      console.log(\"emul [WAIT     ]\", Atomics.load(this._main, 0));\n      Atomics.wait(this._mu, 0, locked);\n    }\n  }\n\n  getWaitSpinLock() {\n    let notWait = true;\n    console.log(\"     [WANT LOCK]\");\n    for(;;) {\n      if(Atomics.load(this._worker, 0) === 0) {    // is the other reserved?\n        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n          return;\n        }\n      }\n      if(notWait) {\n        console.log(\"     [WAIT     ]\");\n        Atomics.store(this._main, 0, 1);\n        notWait = false;\n      }\n    }\n  }\n\n  releaseWaitLock() {\n    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {\n      throw new Error(\"Mutex is in inconsistent state: unlock on unlocked Mutex.\");\n    }\n    Atomics.store(this._worker, 0, 0);\n    Atomics.notify(this._mu, 0, 1)\n  }\n\n  releaseWaitSpinLock() {\n    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {\n        throw new Error(\"Mutex is in inconsistent state: unlock on unlocked Mutex.\");\n    }\n    Atomics.store(this._main, 0, 0);\n    Atomics.notify(this._mu, 0, 1)\n  }\n\n\n  getIncreasingOrderLock() {\n    for(;;) {\n      if(this._worker[0] <= this._main[0]) {    // is reserved?\n        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n          return;\n        }\n      }\n      Atomics.store(this._main, 0, Atomics.add(this._order, 0 ,1));\n      Atomics.wait(this._mu, 0, locked);\n    }\n  }\n\n  getIncreasingOrderSpinLock() {\n    let waitId = -1;\n    for(;;) {\n      if(this._worker[0] >= this._main[0]) {    \n        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n          return;\n        }\n      }\n      if(waitId < 0) {\n        waitId = Atomics.store(this._worker, 0, Atomics.add(this._order, 0 ,1));\n      }\n    }\n  }\n\n  releaseIncreasingOrderLock() { \n    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {\n        throw new Error(\"Mutex is in inconsistent state: unlock on unlocked Mutex.\");\n    }\n    Atomics.store(this._worker, 0, Atomics.add(this._order, 0 ,1));\n    Atomics.notify(this._mu, 0, 1)\n  }\n\n  releaseIncreasingOrderSpinLock() { \n    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {\n        throw new Error(\"Mutex is in inconsistent state: unlock on unlocked Mutex.\");\n    }\n    Atomics.store(this._main, 0, Atomics.add(this._order, 0 ,1));\n    Atomics.notify(this._mu, 0, 1)\n  }\n  \n  /*\n                    notify A, front==end(the last one in the queue), empty\n                                    lock() from emul // newbie intercept\n       A lockAsync(),\n                    \n  */\n  lockQueue() {\n    for(;;) {\n        if(this.isReserved()) {\n          Atomics.wait(this._queue, this.enqueue(), locked);\n        }\n\n        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n          // get lock\n          return;\n        }\n        //Atomics.wait(this._mu, 0, locked);\n        Atomics.wait(this._queue, this.enqueue(), locked);\n        // retry should success. because it is waked up by orderd\n      }\n  }\n\n  lockAsync(waitId) {\n    ////console.log(\"lockAsync :\" + waitId);\n    if(waitId == null) {                // newbie\n        if(this.isReserved()) {         // waiters\n            return this.getWaitAsync();\n        } else {                        // empty\n            return this.getlockAsync();\n        }\n    }\n    \n    if(waitId != null && this.isQualified(waitId)) {\n        console.log(\"QUALIFED: \" + waitId);\n        return this.getlockAsync();\n    } else {\n        throw new Error(\"error with waitId: \" + waitId + \" reserved: \" + this._reserved[0]);\n    }\n  }\n\n  getWaitAsync() {\n    const waitId = this.enqueue();\n    let waitObj;\n    waitObj = Atomics.waitAsync(this._queue, waitId, locked);\n    if(waitObj.async == false) {\n        this.dequeue();\n    }\n    return {waitObj:waitObj, waitId:waitId};\n  }\n\n  getlockAsync() {\n    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n      return {waitObj:null, waitId:null};\n    }\n    //return Atomics.waitAsync(this._mu, 0, locked);\n    return this.getWaitAsync();\n  }\n\n  /*\n  -----------------------------------------------------------------------\n  */\n\n  lockByOrder() {\n    const enterId = this.getId();\n    this.waitLoop(enterId);\n    let waitId = -1;\n\n    this.doorLock();\n    /*\n        if wait by reserved one, it wakeup once by its waitId\n    */\n    if(this.isReserved()) { // after dequeue\n      //this.waitLoop(enterId);\n      waitId = this.enqueue();\n      this.addEnterOrder();\n\n      this.doorUnLock();\n\n      Atomics.wait(this._queue, waitId, locked);\n\n      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n        //this.addEnterOrder();\n        return;\n      } else {\n        throw new Error(\"order broken\");\n      }\n    }\n    \n    /*\n        empty queue, let's compete\n    */\n    for(;;) {\n      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n        if(waitId < 0) {\n          this.addEnterOrder();\n          this.doorUnLock();\n        }\n        return;\n      }\n\n      if(waitId > -1) {\n        throw new Error(\"order broken\");\n      }\n\n      //this.waitLoop(enterId);\n      waitId = this.enqueue();\n      this.addEnterOrder();\n\n      this.doorUnLock();\n\n      Atomics.wait(this._queue, waitId, locked);\n    }\n  }\n\n  /*\n      emul 과 adapter 간의 진입 순서를 가르기 위함인듯.\n      \n      't2 adapter thread에서 spinlock 사용시(queue 없이) t3 emul thread가 새치기 할 수 있음'\n               t1.gelock\n      t2.wait\n               t1.unlock\n               t3.getLock\n      t2.wait\n      --> 이를 막기 위한 waitLoop\n\n\n      emul 1 개 처리동안 adapter 에서 2 개 요청 들어오는 케이스\n      enterOrder, enterId\n          1         1      t1 call    emul\n          1         2      t2 call    adapter  enterId of t2 = 1 // enterId+1, waitLoop(1 < 2)\n          2         2      t1 getLock                            // enterOrder+1 -> break t2's waitLoop\n          3         2      t2 waitAsync                          // enqueue -> enterOrder+1\n          3         3      t3 call    adapter  enterId of t3 = 2 // enterId+1, pass waitLoop\n          4         3      t3 waitAsync                          // enqueue -> enterOrder+1\n                           t1 unlock\n          4         3      t2 getLock\n\n\n          when add enterOrder? 내 처리 끝나고 후배들 waitLoop 풀어주기 위해, 혹은 뉴비가 pass 할 수 있게 준비.\n          after wait  ?\n          after get lock ?  \n          -> 둘 다\n  */\n  waitLoop(enterId) {\n    while(Atomics.load(this._enter_order, 0) < enterId) { }\n    return;\n  }\n\n  doorLock() {\n    for(;;) {\n        if (Atomics.compareExchange(this._door, 0, unlocked, locked) == unlocked) {\n          return;\n        }\n        Atomics.wait(this._door, 0, locked);\n    }\n  }\n\n  doorSpinLock() {\n    for(;;) {\n        if (Atomics.compareExchange(this._door, 0, unlocked, locked) == unlocked) {\n          return;\n        }\n    }\n  }\n\n  doorUnLock() { \n    if (Atomics.compareExchange(this._door, 0, locked, unlocked) != locked) {\n        throw new Error(\"Mutex is in inconsistent state: unlock on unlocked Mutex.\");\n    }\n    Atomics.notify(this._door, 0, 1);\n  }\n\n  addEnterOrder() {\n    Atomics.add(this._enter_order, 0, 1);\n  }\n\n  lockAsyncByOrder() {\n    const enterId = this.getId();\n    this.waitLoop(enterId);\n\n    this.doorSpinLock();\n\n    if(this.isReserved()) {\n      return this.getWaitAsyncByOrder(enterId);\n    } else {\n      return this.getLockAsyncByOrder(enterId);\n    }\n  }\n\n  getWaitAsyncByOrder(enterId) {\n    if(enterId == null) {\n      throw new Error(\"order broken at fulfilled\");\n    }\n    //this.waitLoop(enterId);\n    const waitId = this.enqueue();\n    const waitObj = Atomics.waitAsync(this._queue, waitId, locked);\n    if(waitObj.async == true) {\n      this.addEnterOrder();\n      this.doorUnLock();\n    }\n    return {waitObj:waitObj, waitId:waitId};\n  }\n\n  getLockAsyncByOrder(enterId) {\n    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n      this.addEnterOrder();\n      this.doorUnLock();\n      return {waitObj:null, waitId:null};\n    }\n    return this.getWaitAsyncByOrder(enterId);\n  }\n\n  retryWaitAsyncByOrder(waitId) {\n    const waitObj = Atomics.waitAsync(this._queue, waitId, locked);\n    if(waitObj.async == true) {\n      this.addEnterOrder();\n      this.doorUnLock();\n    }\n    return {waitObj:waitObj, waitId:waitId};\n  }\n\n  getLockAsyncByOrderAndReserved() {\n    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n      return {waitObj:null, waitId:null};\n    }\n    throw new Error(\"reserved was intercepted!\");\n  }\n\n  unlockQueue() { \n    this.doorSpinLock();\n\n    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {\n        throw new Error(\"Mutex is in inconsistent state: unlock on unlocked Mutex.\");\n    }\n    this.dequeue(); // wakeUp next\n\n    this.doorUnLock();\n  }\n\n  enqueue() {\n    const waitId = Atomics.add(this._end, 0, 1) % INT_SIZE; // modular to this._end later...to avoid race condition.\n    /* \n        modular this._end here.\n        waitId and thie._end could be different.\n        Because the other thread add to this._end at the bewteen Atomics.add and Atomics.and\n        But, we use waitId instead of double added this._end in this function.\n    */\n    Atomics.and(this._end, 0, BIT_MOD);\n\n    Atomics.store(this._reserved, 0 , 1);\n\n    Atomics.store(this._queue, waitId, locked);\n    console.log(\"enqueue waitId: \" + waitId);\n    return waitId;\n  }\n\n  /*\n        getLockAsyncByOrder\n\n              emul1(lock)\n              adapter1(queued)\n              emul1(unlock), adapter2(enter while emul1 dequeue)\n              \n  */\n  dequeue() {\n\n    if(this.isEmpty()) {\n      Atomics.store(this._reserved, 0 , -1);\n      return;\n    }\n    const wakeUpId = Atomics.add(this._front, 0, 1) % INT_SIZE;\n    console.log(\"dequeue wakeUpId: \" + wakeUpId);\n                                                              // << isEmpty true\n    Atomics.and(this._front, 0, BIT_MOD);\n                                                              // << reserved == -1\n    //Atomics.store(this._reserved, 0, wakeUpId);\n\n    Atomics.store(this._queue, wakeUpId, unlocked);\n    Atomics.notify(this._queue, wakeUpId, 1);\n  }\n\n  isEmpty() {\n    return (this._front[0] % INT_SIZE) == (this._end[0] % INT_SIZE);\n  }\n\n  isFull() {\n    return ((this._end[0] + 1) % INT_SIZE) == (this._front[0] % INT_SIZE);\n  }\n\n  isQualified(waitId) {\n    //console.log(\"isQualified: \"+ this._reserved[0] + \" \" + waitId);\n    return this._reserved[0] === waitId;\n  }\n\n  isReserved() {\n    const reserved = Atomics.load(this._reserved, 0);\n    if(reserved > -1) {\n      console.log(\"isReservd: \" + reserved);\n      return true;\n    }\n    return false;\n    // return Atomics.load(this._reserved, 0) > -1;\n  }\n};\n\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/js/orderlock.js?");
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   OrderLock: () => (/* binding */ OrderLock)
+/* harmony export */ });
+const locked = 1;
+const unlocked = 0;
+
+/*
+   INT_SIZE should be 2 to the power of n
+   to use bitwise operation as modular operation.
+*/
+const INT_SIZE = 16;
+const BIT_MOD = INT_SIZE - 1; 
+
+class OrderLock {
+  /**
+   * Instantiate Mutex.
+   * If opt_sab is provided, the mutex will use it as a backing array.
+   * @param {SharedArrayBuffer} opt_sab Optional SharedArrayBuffer.
+   */
+  /*
+  constructor(opt_sab, opt_queue_sab, opt_front, opt_end, opt_reserved) {
+    this._sab = opt_sab || new SharedArrayBuffer(4);
+    this._mu = new Int32Array(this._sab);
+
+    this._queue_sab = opt_queue_sab || new SharedArrayBuffer(4*(INT_SIZE));
+    this._queue = new Int32Array(this._queue_sab);
+
+    this._front_sab = opt_front || new SharedArrayBuffer(4);
+    this._end_sab = opt_end || new SharedArrayBuffer(4);
+
+    this._front = new Int32Array(this._front_sab);
+    this._end = new Int32Array(this._end_sab);
+
+    this._reserved_sab = opt_reserved || new SharedArrayBuffer(4*(INT_SIZE));
+    this._reserved = new Int32Array(this._reserved_sab);
+    Atomics.store(this._reserved, 0 , -1);
+  }
+  */
+
+  constructor(opt_sab, opt_order, opt_main, opt_worker, opt_dsab, opt_enter_order, opt_queue_sab, opt_front, opt_end, opt_reserved) {
+    this._sab = opt_sab || new SharedArrayBuffer(4);
+    this._mu = new Int32Array(this._sab);
+
+    this._order_buffer = opt_order || new SharedArrayBuffer(4*(INT_SIZE));
+    this._order = new Int32Array(this._order_buffer);
+    this._order[0] = 1;
+
+    this._main_buffer = opt_main || new SharedArrayBuffer(4*(INT_SIZE));
+    this._main = new Int32Array(this._main_buffer);
+
+    this._worker_buffer = opt_worker || new SharedArrayBuffer(4*(INT_SIZE));
+    this._worker = new Int32Array(this._worker_buffer);
+
+    this._dsab = opt_dsab || new SharedArrayBuffer(4);
+    this._door = new Int32Array(this._dsab);
+
+    this._enter_order_buffer = opt_enter_order || new SharedArrayBuffer(4*(INT_SIZE));
+    this._enter_order = new Int32Array(this._enter_order_buffer);
+    this._enter_order[0] = 1;
+
+    this._queue_sab = opt_queue_sab || new SharedArrayBuffer(4*(INT_SIZE));
+    this._queue = new Int32Array(this._queue_sab);
+
+    this._front_sab = opt_front || new SharedArrayBuffer(4);
+    this._end_sab = opt_end || new SharedArrayBuffer(4);
+
+    this._front = new Int32Array(this._front_sab);
+    this._end = new Int32Array(this._end_sab);
+
+    this._reserved_sab = opt_reserved || new SharedArrayBuffer(4*(INT_SIZE));
+    this._reserved = new Int32Array(this._reserved_sab);
+    this._reserved[0] = -1;
+  }
+
+  /**
+   * Instantiate a Mutex connected to the given one.
+   * @param {OrderLock} mu the other Mutex.
+   */
+  static connect(mu) {
+    //return new OrderLock(mu._sab, mu._queue_sab, mu._front_sab, mu._end_sab, mu._reserved_sab);
+    return new OrderLock(mu._sab, mu._order_buffer, mu._main_buffer, mu._worker_buffer, mu._dsab, 
+      mu._enter_order_buffer, mu._queue_sab, mu._front_sab, mu._end_sab, mu._reserved_sab);
+  }
+
+
+  //---------------------------------------------------------
+
+  lock() {
+    const enterId = this.getId();
+    for(;;) {
+        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+          // get lock
+          return enterId;
+        }
+        Atomics.wait(this._mu, 0, locked);
+    }
+  }
+
+  spinLock() {
+    const enterId = this.getId();
+    for(;;) {
+        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+          // get lock
+          return enterId;
+        }
+        //Atomics.wait(this._mu, 0, locked);
+    }
+  }
+
+  getId() {
+    const enterId = Atomics.add(this._order, 0, 1) % INT_SIZE;
+    Atomics.and(this._order, 0, BIT_MOD);
+    return enterId;
+  }
+
+  unLock() { 
+    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
+        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
+    }
+    Atomics.notify(this._mu, 0, 1);
+  }
+  /**
+   *  this._worker[0] is wait flag.
+   */
+  getWaitLock() {
+    console.log("emul [WANT LOCK]");
+    for(;;) {
+      if(Atomics.load(this._main, 0) === 0) {    // is the other reserved?
+        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+          return;
+        }
+      }
+      Atomics.store(this._worker, 0, 1);
+      console.log("emul [WAIT     ]", Atomics.load(this._main, 0));
+      Atomics.wait(this._mu, 0, locked);
+    }
+  }
+
+  getWaitSpinLock() {
+    let notWait = true;
+    console.log("     [WANT LOCK]");
+    for(;;) {
+      if(Atomics.load(this._worker, 0) === 0) {    // is the other reserved?
+        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+          return;
+        }
+      }
+      if(notWait) {
+        console.log("     [WAIT     ]");
+        Atomics.store(this._main, 0, 1);
+        notWait = false;
+      }
+    }
+  }
+
+  releaseWaitLock() {
+    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
+      throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
+    }
+    Atomics.store(this._worker, 0, 0);
+    Atomics.notify(this._mu, 0, 1)
+  }
+
+  releaseWaitSpinLock() {
+    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
+        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
+    }
+    Atomics.store(this._main, 0, 0);
+    Atomics.notify(this._mu, 0, 1)
+  }
+
+
+  getIncreasingOrderLock() {
+    for(;;) {
+      if(this._worker[0] <= this._main[0]) {    // is reserved?
+        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+          return;
+        }
+      }
+      Atomics.store(this._main, 0, Atomics.add(this._order, 0 ,1));
+      Atomics.wait(this._mu, 0, locked);
+    }
+  }
+
+  getIncreasingOrderSpinLock() {
+    let waitId = -1;
+    for(;;) {
+      if(this._worker[0] >= this._main[0]) {    
+        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+          return;
+        }
+      }
+      if(waitId < 0) {
+        waitId = Atomics.store(this._worker, 0, Atomics.add(this._order, 0 ,1));
+      }
+    }
+  }
+
+  releaseIncreasingOrderLock() { 
+    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
+        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
+    }
+    Atomics.store(this._worker, 0, Atomics.add(this._order, 0 ,1));
+    Atomics.notify(this._mu, 0, 1)
+  }
+
+  releaseIncreasingOrderSpinLock() { 
+    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
+        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
+    }
+    Atomics.store(this._main, 0, Atomics.add(this._order, 0 ,1));
+    Atomics.notify(this._mu, 0, 1)
+  }
+  
+  /*
+                    notify A, front==end(the last one in the queue), empty
+                                    lock() from emul // newbie intercept
+       A lockAsync(),
+                    
+  */
+  lockQueue() {
+    for(;;) {
+        if(this.isReserved()) {
+          Atomics.wait(this._queue, this.enqueue(), locked);
+        }
+
+        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+          // get lock
+          return;
+        }
+        //Atomics.wait(this._mu, 0, locked);
+        Atomics.wait(this._queue, this.enqueue(), locked);
+        // retry should success. because it is waked up by orderd
+      }
+  }
+
+  lockAsync(waitId) {
+    ////console.log("lockAsync :" + waitId);
+    if(waitId == null) {                // newbie
+        if(this.isReserved()) {         // waiters
+            return this.getWaitAsync();
+        } else {                        // empty
+            return this.getlockAsync();
+        }
+    }
+    
+    if(waitId != null && this.isQualified(waitId)) {
+        console.log("QUALIFED: " + waitId);
+        return this.getlockAsync();
+    } else {
+        throw new Error("error with waitId: " + waitId + " reserved: " + this._reserved[0]);
+    }
+  }
+
+  getWaitAsync() {
+    const waitId = this.enqueue();
+    let waitObj;
+    waitObj = Atomics.waitAsync(this._queue, waitId, locked);
+    if(waitObj.async == false) {
+        this.dequeue();
+    }
+    return {waitObj:waitObj, waitId:waitId};
+  }
+
+  getlockAsync() {
+    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+      return {waitObj:null, waitId:null};
+    }
+    //return Atomics.waitAsync(this._mu, 0, locked);
+    return this.getWaitAsync();
+  }
+
+  /*
+  -----------------------------------------------------------------------
+  */
+
+  lockByOrder() {
+    const enterId = this.getId();
+    this.waitLoop(enterId);
+    let waitId = -1;
+
+    this.doorLock();
+    /*
+        if wait by reserved one, it wakeup once by its waitId
+    */
+    if(this.isReserved()) { // after dequeue
+      //this.waitLoop(enterId);
+      waitId = this.enqueue();
+      this.addEnterOrder();
+
+      this.doorUnLock();
+
+      Atomics.wait(this._queue, waitId, locked);
+
+      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+        //this.addEnterOrder();
+        return;
+      } else {
+        throw new Error("order broken");
+      }
+    }
+    
+    /*
+        empty queue, let's compete
+    */
+    for(;;) {
+      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+        if(waitId < 0) {
+          this.addEnterOrder();
+          this.doorUnLock();
+        }
+        return;
+      }
+
+      if(waitId > -1) {
+        throw new Error("order broken");
+      }
+
+      //this.waitLoop(enterId);
+      waitId = this.enqueue();
+      this.addEnterOrder();
+
+      this.doorUnLock();
+
+      Atomics.wait(this._queue, waitId, locked);
+    }
+  }
+
+  /*
+      emul 과 adapter 간의 진입 순서를 가르기 위함인듯.
+      
+      't2 adapter thread에서 spinlock 사용시(queue 없이) t3 emul thread가 새치기 할 수 있음'
+               t1.gelock
+      t2.wait
+               t1.unlock
+               t3.getLock
+      t2.wait
+      --> 이를 막기 위한 waitLoop
+
+
+      emul 1 개 처리동안 adapter 에서 2 개 요청 들어오는 케이스
+      enterOrder, enterId
+          1         1      t1 call    emul
+          1         2      t2 call    adapter  enterId of t2 = 1 // enterId+1, waitLoop(1 < 2)
+          2         2      t1 getLock                            // enterOrder+1 -> break t2's waitLoop
+          3         2      t2 waitAsync                          // enqueue -> enterOrder+1
+          3         3      t3 call    adapter  enterId of t3 = 2 // enterId+1, pass waitLoop
+          4         3      t3 waitAsync                          // enqueue -> enterOrder+1
+                           t1 unlock
+          4         3      t2 getLock
+
+
+          when add enterOrder? 내 처리 끝나고 후배들 waitLoop 풀어주기 위해, 혹은 뉴비가 pass 할 수 있게 준비.
+          after wait  ?
+          after get lock ?  
+          -> 둘 다
+  */
+  waitLoop(enterId) {
+    while(Atomics.load(this._enter_order, 0) < enterId) { }
+    return;
+  }
+
+  doorLock() {
+    for(;;) {
+        if (Atomics.compareExchange(this._door, 0, unlocked, locked) == unlocked) {
+          return;
+        }
+        Atomics.wait(this._door, 0, locked);
+    }
+  }
+
+  doorSpinLock() {
+    for(;;) {
+        if (Atomics.compareExchange(this._door, 0, unlocked, locked) == unlocked) {
+          return;
+        }
+    }
+  }
+
+  doorUnLock() { 
+    if (Atomics.compareExchange(this._door, 0, locked, unlocked) != locked) {
+        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
+    }
+    Atomics.notify(this._door, 0, 1);
+  }
+
+  addEnterOrder() {
+    Atomics.add(this._enter_order, 0, 1);
+  }
+
+  lockAsyncByOrder() {
+    const enterId = this.getId();
+    this.waitLoop(enterId);
+
+    this.doorSpinLock();
+
+    if(this.isReserved()) {
+      return this.getWaitAsyncByOrder(enterId);
+    } else {
+      return this.getLockAsyncByOrder(enterId);
+    }
+  }
+
+  getWaitAsyncByOrder(enterId) {
+    if(enterId == null) {
+      throw new Error("order broken at fulfilled");
+    }
+    //this.waitLoop(enterId);
+    const waitId = this.enqueue();
+    const waitObj = Atomics.waitAsync(this._queue, waitId, locked);
+    if(waitObj.async == true) {
+      this.addEnterOrder();
+      this.doorUnLock();
+    }
+    return {waitObj:waitObj, waitId:waitId};
+  }
+
+  getLockAsyncByOrder(enterId) {
+    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+      this.addEnterOrder();
+      this.doorUnLock();
+      return {waitObj:null, waitId:null};
+    }
+    return this.getWaitAsyncByOrder(enterId);
+  }
+
+  retryWaitAsyncByOrder(waitId) {
+    const waitObj = Atomics.waitAsync(this._queue, waitId, locked);
+    if(waitObj.async == true) {
+      this.addEnterOrder();
+      this.doorUnLock();
+    }
+    return {waitObj:waitObj, waitId:waitId};
+  }
+
+  getLockAsyncByOrderAndReserved() {
+    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+      return {waitObj:null, waitId:null};
+    }
+    throw new Error("reserved was intercepted!");
+  }
+
+  unlockQueue() { 
+    this.doorSpinLock();
+
+    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
+        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
+    }
+    this.dequeue(); // wakeUp next
+
+    this.doorUnLock();
+  }
+
+  enqueue() {
+    const waitId = Atomics.add(this._end, 0, 1) % INT_SIZE; // modular to this._end later...to avoid race condition.
+    /* 
+        modular this._end here.
+        waitId and thie._end could be different.
+        Because the other thread add to this._end at the bewteen Atomics.add and Atomics.and
+        But, we use waitId instead of double added this._end in this function.
+    */
+    Atomics.and(this._end, 0, BIT_MOD);
+
+    Atomics.store(this._reserved, 0 , 1);
+
+    Atomics.store(this._queue, waitId, locked);
+    console.log("enqueue waitId: " + waitId);
+    return waitId;
+  }
+
+  /*
+        getLockAsyncByOrder
+
+              emul1(lock)
+              adapter1(queued)
+              emul1(unlock), adapter2(enter while emul1 dequeue)
+              
+  */
+  dequeue() {
+
+    if(this.isEmpty()) {
+      Atomics.store(this._reserved, 0 , -1);
+      return;
+    }
+    const wakeUpId = Atomics.add(this._front, 0, 1) % INT_SIZE;
+    console.log("dequeue wakeUpId: " + wakeUpId);
+                                                              // << isEmpty true
+    Atomics.and(this._front, 0, BIT_MOD);
+                                                              // << reserved == -1
+    //Atomics.store(this._reserved, 0, wakeUpId);
+
+    Atomics.store(this._queue, wakeUpId, unlocked);
+    Atomics.notify(this._queue, wakeUpId, 1);
+  }
+
+  isEmpty() {
+    return (this._front[0] % INT_SIZE) == (this._end[0] % INT_SIZE);
+  }
+
+  isFull() {
+    return ((this._end[0] + 1) % INT_SIZE) == (this._front[0] % INT_SIZE);
+  }
+
+  isQualified(waitId) {
+    //console.log("isQualified: "+ this._reserved[0] + " " + waitId);
+    return this._reserved[0] === waitId;
+  }
+
+  isReserved() {
+    const reserved = Atomics.load(this._reserved, 0);
+    if(reserved > -1) {
+      console.log("isReservd: " + reserved);
+      return true;
+    }
+    return false;
+    // return Atomics.load(this._reserved, 0) > -1;
+  }
+};
+
 
 /***/ }),
 
@@ -116,7 +3988,77 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
   \***************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   Mutex: () => (/* binding */ Mutex)\n/* harmony export */ });\nconst locked = 1;\nconst unlocked = 0;\n\nclass Mutex {\n  /**\n   * Instantiate Mutex.\n   * If opt_sab is provided, the mutex will use it as a backing array.\n   * @param {SharedArrayBuffer} opt_sab Optional SharedArrayBuffer.\n   */\n  constructor(opt_sab) {\n    this._sab = opt_sab || new SharedArrayBuffer(4);\n    this._mu = new Int32Array(this._sab);\n  }\n\n  /**\n   * Instantiate a Mutex connected to the given one.\n   * @param {Mutex} mu the other Mutex.\n   */\n  static connect(mu) {\n    return new Mutex(mu._sab);\n  }\n\n  lock() {\n    for(;;) {\n      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n        // get lock\n        return;\n      }\n      Atomics.wait(this._mu, 0, locked);\n      // retry\n    }\n  }\n\n  spinlock() {\n    for(;;) {\n      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n        // get lock\n        return;\n      }\n      // retry\n    }\n  }\n\n  lockAsync() {\n    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {\n      return;\n    }\n    return Atomics.waitAsync(this._mu, 0, locked);\n  }\n\n  unlock() {\n    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {\n        return;\n      //throw new Error(\"Mutex is in inconsistent state: unlock on unlocked Mutex.\");\n    }\n    Atomics.notify(this._mu, 0, 1);\n  }\n\n  isLocked() {\n    return Atomics.load(this._mu, 0) == locked;\n  }\n\n  getState() {\n    return Atomics.load(this._mu, 0);\n  }\n};\n\n\n//# sourceURL=webpack://dmg_rtc_par_pattern/./public/js/sync.js?");
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Mutex: () => (/* binding */ Mutex)
+/* harmony export */ });
+const locked = 1;
+const unlocked = 0;
+
+class Mutex {
+  /**
+   * Instantiate Mutex.
+   * If opt_sab is provided, the mutex will use it as a backing array.
+   * @param {SharedArrayBuffer} opt_sab Optional SharedArrayBuffer.
+   */
+  constructor(opt_sab) {
+    this._sab = opt_sab || new SharedArrayBuffer(4);
+    this._mu = new Int32Array(this._sab);
+  }
+
+  /**
+   * Instantiate a Mutex connected to the given one.
+   * @param {Mutex} mu the other Mutex.
+   */
+  static connect(mu) {
+    return new Mutex(mu._sab);
+  }
+
+  lock() {
+    for(;;) {
+      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+        // get lock
+        return;
+      }
+      Atomics.wait(this._mu, 0, locked);
+      // retry
+    }
+  }
+
+  spinlock() {
+    for(;;) {
+      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+        // get lock
+        return;
+      }
+      // retry
+    }
+  }
+
+  lockAsync() {
+    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
+      return;
+    }
+    return Atomics.waitAsync(this._mu, 0, locked);
+  }
+
+  unlock() {
+    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
+        return;
+      //throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
+    }
+    Atomics.notify(this._mu, 0, 1);
+  }
+
+  isLocked() {
+    return Atomics.load(this._mu, 0) == locked;
+  }
+
+  getState() {
+    return Atomics.load(this._mu, 0);
+  }
+};
+
 
 /***/ })
 
@@ -176,11 +4118,615 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
 /******/ 	})();
 /******/ 	
 /************************************************************************/
-/******/ 	
-/******/ 	// startup
-/******/ 	// Load entry module and return exports
-/******/ 	// This entry module can't be inlined because the eval devtool is used.
-/******/ 	var __webpack_exports__ = __webpack_require__("./public/js/emulworker.js");
-/******/ 	
+var __webpack_exports__ = {};
+/*!*********************************!*\
+  !*** ./public/js/emulworker.js ***!
+  \*********************************/
+__webpack_require__.r(__webpack_exports__);
+/* harmony import */ var _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./gb/cpu.js */ "./public/js/gb/cpu.js");
+/* harmony import */ var _gb_display_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./gb/display.js */ "./public/js/gb/display.js");
+/* harmony import */ var _sync_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./sync.js */ "./public/js/sync.js");
+/* harmony import */ var _orderlock_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./orderlock.js */ "./public/js/orderlock.js");
+/*
+importScripts('gb/cartridge.js',
+    'gb/cpu.js',
+    'gb/display.js',
+    'gb/joypad.js',
+    'gb/rtc.js',
+    'gb/serial.js',
+    'gb/sound.js',
+    'gb/timer.js',
+    'sync.js',
+    'orderlock.js',
+  '../dummylogger.js');
+*/
+
+
+ // Adjust based on actual exports
+ // Adjust based on actual exports
+
+
+//const { Mutex } = self; 
+//const { OrderLock } = self;
+
+let delayGap = 0;
+let timestampLock = 0;
+let mu;
+let orderLock;
+const maxSize = 1024 * 1024 * 1000;
+
+let sharedArray;
+let sharedBuffer;
+//let currentDataSize = 0; // Track the current size of data written
+
+// Initialize TextEncoder and TextDecoder once
+const txtEncoder = new TextEncoder();
+const txtDecoder = new TextDecoder();
+
+let sharedCurrentSizeBuffer;
+let sharedCurrentSize;
+
+function saveLog(...args) {
+  saveLogImpl(...args);
+}
+
+function saveLogImpl(...args) {
+  const enterId = orderLock.lock();
+  //console.log("emul [GET LOCK]");
+  const line = "[" + enterId + "] " + args.join(' ');
+  
+  let currentSize = Atomics.load(sharedCurrentSize, 0);
+  const encodedLine = txtEncoder.encode(line + '\n'); // Add newline for separation
+  const lineSize = encodedLine.length;
+
+  // Check if there is enough space in the buffer
+  if (currentSize + lineSize > maxSize) {
+      console.log('Buffer is full. Cannot add more data.');
+      orderLock.unLock();
+      return false; // Indicate that the buffer is full
+  }
+
+  // Store the encoded line in the buffer atomically
+  for (let i = 0; i < lineSize; i++) {
+      Atomics.store(sharedArray, currentSize + i, encodedLine[i]);
+  }
+
+  // Update the current size atomically
+  Atomics.add(new Int32Array(sharedBuffer), 0, lineSize); // Assuming the first 4 bytes of the buffer are used for currentSize
+  //currentSize += lineSize; // Update the current size
+  Atomics.add(sharedCurrentSize, 0, lineSize);
+
+  orderLock.unLock();
+  //console.log("emul [RELEASE LOCK]");
+  return true; // Indicate success
+}
+
+self.onmessage = event => {
+  const {msg, payload} = event.data;
+  switch (msg) {
+    case 'init':
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas = payload.canvas;
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.getContext('2d');
+      timestampLock = new Int32Array(payload.networkTimingBuffer);
+  
+      mu = _sync_js__WEBPACK_IMPORTED_MODULE_2__.Mutex.connect(payload.smu);
+
+      sharedBuffer = payload.buffer;
+      sharedArray = new Uint8Array(sharedBuffer);
+
+      sharedCurrentSizeBuffer = payload.currentSizeBuffer;
+      sharedCurrentSize = new Int32Array(sharedCurrentSizeBuffer);
+
+      orderLock = _orderlock_js__WEBPACK_IMPORTED_MODULE_3__.OrderLock.connect(payload.orderLock);
+
+      loadAndStart(payload);
+      break;
+    case 'restart':
+      const current = performance.now();
+      const travelTime = current-past;
+      const leftDelayTime = delayGap - travelTime;
+
+      saveLog("delayGap     : ", delayGap.toFixed(3));
+      saveLog("travelTime   : ", travelTime.toFixed(3));
+      saveLog("leftDelayTime: ", leftDelayTime.toFixed(3));
+
+      /*
+      if(payload.isNextRecvQ) {
+        saveLog("****0       : nextRecvQ is true");
+        preStart();
+        saveLog("****0       break");
+        return;
+      }
+      */
+
+      if(delayGap <= 0) { // repay armotized delay by skipping the wait time
+        saveLog("**** 1      : Gap1 is exceed 16.74");
+        preStart();
+        saveLog("**** 1      break");
+        return;
+      }      
+      
+      if(leftDelayTime <= 0) { // repay armotized delay by skipping the wait time
+        saveLog("****  2     : travel Time used all delayGap");
+        preStart();
+        saveLog("****  2     break");
+        return;
+      }
+
+      if(leftDelayTime > 4) {
+        saveLog("****   3    : more than 4ms call SetTimeout ");
+        setTimeout(() =>  preStart(), leftDelayTime);
+        saveLog("****   3    break");
+        return;
+      } 
+
+      saveLog("****    4   : left delay is less than and equal four. " + leftDelayTime.toFixed(3));
+      preStart();
+      saveLog("****    4   break");
+
+      return;
+    case 'start':
+      noDelayUpdate();
+      return;
+    default:
+      //saveLog(event);
+      console.log(event);
+  }
+};
+
+let gb;
+let cycles;
+let next;
+let paused = false;
+let running = false;
+
+let past;
+
+let oldUpdateGap = 0;
+let fps = 0;
+let isInitUpdate = true;
+
+let pastGap = 0;
+
+let timestamp = 0;
+let mainLock;
+let tsIdx = 0;
+
+function preStart() {
+  self.postMessage({
+    msg: 'T',
+    payload: -1,
+    time: -1
+  });
+}
+
+let cpuCycles = 0;
+const PERIOD = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame/3;
+
+function noDelayUpdate() {
+  const startTime = performance.now();
+  _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime = startTime;
+  const gap0 = startTime - past;
+  //saveLog("start time: ", startTime.toFixed(3));
+  saveLog("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white")
+
+ if (paused || !running) {
+        return;
+    }
+    if (gb.cartridge.hasRTC) {
+        gb.cartridge.rtc.updateTime();
+    }
+    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+        try {
+            cpuCycles = gb.cycle();
+            cycles += cpuCycles;
+            
+            /*
+              [TODO]
+              if the user try to start 1p,
+              this logic should be skipped
+            */
+
+            timestamp += cpuCycles;
+            if(timestamp >= PERIOD) {
+              timestamp = timestamp - PERIOD;
+
+              tsIdx = (tsIdx + 1) % 10;
+
+              
+              mu.lock();
+
+              self.postMessage({
+                msg: 'ts',
+                payload: tsIdx,
+                time: -1
+              });
+              saveLog("ts request " + tsIdx);
+              Atomics.store(timestampLock, 0, 1);
+              saveLog("ts blocked " + tsIdx);
+              Atomics.wait(timestampLock, 0, 1);
+              saveLog("ts unblocked " + tsIdx);
+              
+            }
+            
+        } catch (error) {
+            console.error(error);
+            running = false;
+            return;
+        }
+    }
+    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+    saveLog("over cycles: ", cycles);
+
+    fps++;
+
+
+    const current = performance.now();
+    past = current;
+    const gap1 = current-startTime;
+    saveLog("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:orange; color:black");
+
+
+    if(fps > 59) {
+      saveLog(fps + " fps over 59, reset old delay 0")
+      isInitUpdate = true; // reset delay
+    }
+    
+    if(isInitUpdate) {
+      isInitUpdate = false;
+      next = current;
+      delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
+    } else {
+
+      // amortized
+      next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
+      delayGap = next - current;
+      
+      // not amortized
+      /*
+      if((delayGap > 0) && (gap0 > delayGap)) {
+        delayGap = Display.frameInterval - (gap0 - delayGap) - gap1;
+      } else {
+        delayGap = Display.frameInterval - gap1;
+      }
+      */
+    }
+
+    self.postMessage({ // recvQ
+      msg: 'M',
+      payload: -1,
+      time: -1
+    });
+}
+
+
+function oldUpdate() {
+  const startTime = performance.now();
+    const gap0 = startTime - past;
+    saveLog("%c [GAPx]    e}_ {s     e}   = " + pastGap.toFixed(3), "background:blue; color:white");
+    saveLog("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white");
+    if(pastGap > 0) {
+        saveLog("%c [GAPr]    e} _{s     e}   = " + (gap0-pastGap).toFixed(3), "background:green; color:white");
+    } else {
+        saveLog("%c [GAPr]    e} _{s     e}   = " + (gap0).toFixed(3), "background:green; color:white");
+    }
+
+    if (paused || !running) {
+        return;
+    }
+    if (gb.cartridge.hasRTC) {
+        gb.cartridge.rtc.updateTime();
+    }
+    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+        try {
+            cycles += gb.cycle();
+        } catch (error) {
+            console.error(error);
+            running = false;
+            return;
+        }
+    }
+    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+
+    fps++;
+
+    const current = performance.now();
+    const gap1 = current-startTime;
+    let nextGap;
+
+    
+    if(isInitUpdate) {
+      isInitUpdate = false;
+      next = current;
+      nextGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval-gap1;
+    } else {
+      next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
+      nextGap = next - current;
+    }
+    
+
+    // origin
+    //next += Display.frameInterval; //next += 16.74 or 8.37
+    //nextGap = next - current;
+    //
+
+
+    saveLog("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:orange; color:black");
+    saveLog("%c [GAP4]        {s     e}___= " + nextGap.toFixed(3), "color:blue");
+
+    past = current;
+
+    pastGap = nextGap;
+    
+    setTimeout(oldUpdate, nextGap);
+}
+
+let lastTime;
+function paint(callTime) {
+  saveLog("%c [GAP$] {s__}___{e  }   = " + (callTime - lastTime).toFixed(3), "background:green; color:white");
+  lastTime = callTime;
+
+  /*
+  const startTime = performance.now();
+  const gap0 = startTime - past;
+  saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
+  */
+  
+
+  if (paused || !running) {
+    return;
+  }
+  if (gb.cartridge.hasRTC) {
+    saveLog("%c RTC " , "background:black; color:white");
+    gb.cartridge.rtc.updateTime();
+  }
+
+  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+    try {
+      cycles += gb.cycle();
+    } catch (error) {
+      console.error(error);
+      running = false;
+      return;
+    }
+  }
+  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+
+  fps++;
+
+  /*
+  const current = performance.now();
+  const gap1 = current - startTime;
+  past = current;
+  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
+  */
+  
+
+  requestAnimationFrame(paint);
+}
+
+
+function update() {
+  const startTime = performance.now();
+  const gap0 = startTime - past;
+  saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
+
+  if (paused || !running) {
+    return;
+  }
+  if (gb.cartridge.hasRTC) {
+    gb.cartridge.rtc.updateTime();
+  }
+
+  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+    try {
+      cycles += gb.cycle();
+    } catch (error) {
+      console.error(error);
+      running = false;
+      return;
+    }
+  }
+  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+
+  fps++;
+
+
+
+
+
+
+  /**
+         'loadAndStart'   'setTimeout'
+      next  : now,         now+16.74,         // ideal lap time
+      before: now,   now+x            now+y,
+
+
+     =========|=========|
+      (     )   (    )
+            <--       <--
+
+      updateGap = next - current
+     
+   */
+  /*
+  const current = performance.now();
+  const gap1 = current-startTime;
+  let updateGap;
+  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정
+    isInitUpdate = false;
+    next = current;
+    updateGap = Display.frameInterval-gap1;
+  } else {
+    next += Display.frameInterval; // +16.74ms
+    updateGap = next - current;
+  }
+  past = current;
+
+  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
+  saveLog("%c [GAPu] s}    {    e}<--= " + updateGap.toFixed(3), "background:green; color:white");
+  
+  setTimeout(() => update(), updateGap);
+*/
+
+
+
+  /*
+   const current = performance.now();
+   const setTimeoutGap = current-past;
+   past = current;
+   const updateGap = Display.frameInterval - setTimeoutGap;
+
+   saveLog("%c [GAP1]        {s-----e}   = " + (current-startTime).toFixed(3), "background:orange; color:black");
+   saveLog("%c [GAP2] {  s}--{------e}   = "+ setTimeoutGap.toFixed(3), "background:yellow; color:black");
+   saveLog("%c [GAP3} {  s--16.74---e}   = "+ updateGap.toFixed(3), "background:green; color:white");
+   */
+
+
+
+/**
+ *   (       )                (      )
+ * 
+ *           _________.........______xxxxx
+ * 
+ *           <------->                       oldUpdateGap     
+ *           <----------------->             gap0
+ *                             <----->       gap1
+ *           <----------------------->       gap2
+ *                                   <--->   updateGap
+ *                    <------->              realDelay
+ */
+
+  /**
+   * 
+   *                          if oldUpdateGap <= gap0
+   *                               (    )    (     )
+   *                                   <-->....
+   *                                   <------>
+   *                                updateGap = 16.74 - (gap0 - oldUpdateGap) - gap1;
+   *                          else
+   *                               (    )    (     )
+   *                                   <-------->
+   *                                   <------>
+   *                                updateGap = 16.74 -         0             - gap1;
+   * 
+   * 
+   *    if oldUpdateGap <= 0 (already over 16.74), then take 4ms gap0 as default delay of mine.
+   * 
+   */
+  
+  const current = performance.now();
+  const gap1 = current - startTime;
+  const gap2 = current - past;
+  const realDelay = oldUpdateGap > gap0 ? 0 : gap0 - oldUpdateGap;
+  
+  let updateGap;
+  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정
+    isInitUpdate = false;
+    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
+  } else {
+    //updateGap = Display.frameInterval - gap2 + oldUpdateGap;  //Display.frameInterval - (gap0 - oldUpdateGap) - gap1;
+    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - realDelay - gap1;
+  }
+
+  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
+  //saveLog("%c [GAP2] s}____{____e}   = " + gap2.toFixed(3), "background:yellow; color:black");
+  saveLog("%c [GAP2] s}  __{    e}   = " + realDelay.toFixed(3), "background:yellow; color:black");
+  saveLog("%c [GAP3] s}__  {    e}   = " + oldUpdateGap.toFixed(3), "background:green; color:white");
+  saveLog("%c [GAP4] s}    {s   e}__ = " + updateGap.toFixed(3), "background:blue; color:white");
+
+  if(updateGap < 0) {
+    updateGap = 0;
+  }
+  oldUpdateGap = updateGap;
+  past = current;
+
+
+  setTimeout(() => update(), updateGap);
+  
+
+
+  /** 
+      setInterval
+  */
+  /*
+  const current = performance.now();
+  const gap1 = current - startTime;
+  past = current;
+  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
+  */
+  
+  
+}
+
+let printOld;
+
+function printFps() {
+  const current = performance.now();
+
+ /*
+  save the int value to setIntGap
+ */
+  const setIntGap = (current - printOld).toFixed(0);
+  const letter = fps + " " + _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps + " " + setIntGap;
+  let isSame = true;
+  if(fps !== _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps) {
+    isSame = false; 
+  } 
+  self.postMessage({msg: 'F', payload: letter, time:isSame});
+
+  saveLog("%c FPS= " + letter, "background:cyan; color:black");
+  saveLog("%c 1 sec= " + setIntGap,
+      "background:cyan; color:red");
+  _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps = 0;
+  fps = 0;
+  printOld = current;
+}
+
+function loadAndStart(payload) {
+  let rom = payload.uInt8Array;
+  gb = new _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy(payload.flagSharedBuffer,
+      payload.sbSharedBuffer,
+      payload.scSharedBuffer,
+      payload.transferTriggerSharedBuffer,
+      payload.useInternalClockSharedBuffer,
+      payload.sharedBuffer,
+      payload.timingBuffer,
+      payload.waitScBuffer,
+      payload.keySharedBuffer,
+      payload.scDirtySharedBuffer,
+      payload.scMonitorStartSharedBuffer,
+      payload.soundLeftSab,
+      payload.soundRightSab,
+      payload.fillSab,
+      payload.bufferLen);
+  gb.setMessenger(self);
+  try {
+    gb.cartridge.load(rom);
+    running = true;
+    past = performance.now();
+    cycles = 0;
+    saveLog("load");
+
+    next = past;
+
+    //update();
+    //oldUpdate();
+
+    noDelayUpdate();
+
+    //setInterval(() => update(), Display.frameInterval);
+
+    //requestAnimationFrame(paint);
+
+    printOld = past;
+    setInterval(() => printFps(), 1000);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 /******/ })()
 ;
