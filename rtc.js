@@ -34778,7 +34778,7 @@ function initSound(){
   gainNode.connect(soundCtx.destination);
 
   let soundWorklet;
-  soundCtx.audioWorklet.addModule('sound-processor.js').then(() => {
+  soundCtx.audioWorklet.addModule('soundprocessor.js').then(() => {
     const options = {
       outputChannelCount: [2]
     };
