@@ -34770,19 +34770,25 @@ function pushBuffer(){
   }
 }
 
+let soundCtx;// = new (window.AudioContext || window.webkitAudioContext)({sampleRate: sampleFrequency});
+let soundWorklet;
+let gainNode;
 function initSound(){
-  const soundCtx = new (window.AudioContext || window.webkitAudioContext)({sampleRate: sampleFrequency});
-
-  const gainNode = soundCtx.createGain();
+  soundCtx = new (window.AudioContext || window.webkitAudioContext)({sampleRate: sampleFrequency});
+ 
+  gainNode = soundCtx.createGain();
   gainNode.gain.value = volume;
   gainNode.connect(soundCtx.destination);
 
-  let soundWorklet;
+
+  console.log("A");
   soundCtx.audioWorklet.addModule('soundprocessor.js').then(() => {
     const options = {
       outputChannelCount: [2]
     };
-    soundWorklet = new AudioWorkletNode(soundCtx, 'sound-processor', options);
+    console.log("B");
+    soundWorklet = new AudioWorkletNode(soundCtx, 'soundprocessor', options);
+    console.log("C");
 
     soundWorklet.port.postMessage({
       fillSab: soundFilledSab,
@@ -34792,9 +34798,14 @@ function initSound(){
     });
 
     soundWorklet.connect(gainNode);
+
+    if (soundCtx.state == 'suspended') {
+           soundCtx.resume();
+    }
   }).catch(e => {
     console.log('error loading audio worklet module: ', e);
   });
+  console.log("D");
 }
 
 
@@ -34957,6 +34968,8 @@ document.addEventListener('click', () => {
   }
 });
 */
+
+//initSound();
 
 const romFileInput = document.getElementById('romFileInput');
 let romFile;

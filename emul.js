@@ -4330,6 +4330,7 @@ function noDelayUpdate() {
               this logic should be skipped
             */
 
+            
             timestamp += cpuCycles;
             if(timestamp >= PERIOD) {
               timestamp = timestamp - PERIOD;
@@ -4351,6 +4352,7 @@ function noDelayUpdate() {
               saveLog("ts unblocked " + tsIdx);
               
             }
+            
             
         } catch (error) {
             console.error(error);

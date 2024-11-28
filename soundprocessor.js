@@ -2,9 +2,13 @@
 /*!**************************************!*\
   !*** ./public/js/sound-processor.js ***!
   \**************************************/
+console.log('open');
+
 class SoundProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
+
+        console.log('in constructor');
 
         this.remains = 0;
         this.idx = 0;
@@ -13,8 +17,9 @@ class SoundProcessor extends AudioWorkletProcessor {
             this.filled = new Int32Array(event.data.fillSab);
             this.channels = new Array(2);
             this.channels[0] = new Float32Array(event.data.leftSab);
-            this.channels[1] = new Float32Array(evnet.data.rightSab);
+            this.channels[1] = new Float32Array(event.data.rightSab);
             this.bufferLen = event.data.bufferLen;
+            console.log("receive processor");
         };
     }
 
@@ -44,6 +49,6 @@ class SoundProcessor extends AudioWorkletProcessor {
     
 }
 
-registerProcessor('sound-processor'. SoundProcessor);
+registerProcessor('soundprocessor', SoundProcessor);
 /******/ })()
 ;
