@@ -34773,6 +34773,7 @@ function pushBuffer(){
 let soundCtx;// = new (window.AudioContext || window.webkitAudioContext)({sampleRate: sampleFrequency});
 let soundWorklet;
 let gainNode;
+let lap, oldlap;
 function initSound(){
   soundCtx = new (window.AudioContext || window.webkitAudioContext)({sampleRate: sampleFrequency});
  
@@ -34781,14 +34782,11 @@ function initSound(){
   gainNode.connect(soundCtx.destination);
 
 
-  console.log("A");
   soundCtx.audioWorklet.addModule('soundprocessor.js').then(() => {
     const options = {
       outputChannelCount: [2]
     };
-    console.log("B");
     soundWorklet = new AudioWorkletNode(soundCtx, 'soundprocessor', options);
-    console.log("C");
 
     soundWorklet.port.postMessage({
       fillSab: soundFilledSab,
@@ -34799,13 +34797,19 @@ function initSound(){
 
     soundWorklet.connect(gainNode);
 
+    soundWorklet.port.onmessage = (event) => {
+      lap = soundCtx.currentTime;
+      //console.log("lap: "+ (lap-oldlap).toFixed(3));
+      oldlap = lap;
+      renderWaveform(event.data.waveform);
+    };
+
     if (soundCtx.state == 'suspended') {
            soundCtx.resume();
     }
   }).catch(e => {
     console.log('error loading audio worklet module: ', e);
   });
-  console.log("D");
 }
 
 
@@ -34987,6 +34991,58 @@ romFileInput.addEventListener('change', () => {
   });
   reader.readAsArrayBuffer(romFileInput.files[0]);
 });
+
+const canvas = document.getElementById('waveform');
+const canvasCtx = canvas.getContext('2d');
+let priorBuffer;
+function renderWaveform(buffer) {
+  const bufferLen = buffer.length;
+  const width = canvas.width;
+  const height = canvas.height;
+  const len = width/2 - 10;
+
+  if(priorBuffer != null) {
+    canvasCtx.clearRect(0, 0, width, height);
+
+    canvasCtx.beginPath();
+    canvasCtx.moveTo(0, height/2);
+
+    let w = 0;
+    for(let i = bufferLen-len; i < bufferLen; i++) {
+      canvasCtx.lineTo(w++, (priorBuffer[i]+1) * (height/2));
+    }
+
+    canvasCtx.strokeStyle = 'blue';
+    canvasCtx.stroke();
+
+
+    canvasCtx.beginPath();
+    canvasCtx.moveTo(width, height/2);
+
+    w = 0;
+    for(let i = len-1; i >= 0; i--) {
+      canvasCtx.lineTo(width-(w++), (buffer[i]+1) *(height/2));
+    }
+
+    canvasCtx.strokeStyle = 'red';
+    canvasCtx.stroke();
+
+    
+    canvasCtx.beginPath();
+    canvasCtx.moveTo(0, height/2);
+    canvasCtx.lineTo(width, height/2);
+    canvasCtx.strokeStyle = 'green';
+    canvasCtx.stroke();
+
+    canvasCtx.beginPath();
+    canvasCtx.moveTo(len, (priorBuffer[bufferLen-1] + 1) * (height/2));
+    canvasCtx.lineTo(width-len, (buffer[0] + 1)*(height/2));
+    canvasCtx.strokeStyle = 'orange';
+    canvasCtx.stroke();
+  }
+  priorBuffer = buffer;
+
+} 
 
 /***/ }),
 
@@ -35624,7 +35680,9 @@ const logs = [];
 function mainLog(...args) {
     //const message = args.join(' ');
     //console.log(args);
-    saveLine(args);
+    
+    //saveLine(args);
+    
     //getAsyncOrderedLock(saveLine, message);
 }
 
