@@ -2415,15 +2415,22 @@ Display.frameDuration = Display.cpuCyclesPerFrame / (4194304 / 4);//GameBoy.freq
                             // (456 * 154) / (4194304 / 1048576) / 1048576 = (456 * 154) / 4194304
 Display.frameInterval = Display.frameDuration * 1000; // 16.74 ms
 Display.palette = [
-    0xffdeffef, 0xff94d7ad, 0xff739252, 0xff423418
+    0xffdeffef, 0xff94d7ad, 0xff739252, 0xff423418  // ffEFFFDE in little endian, ARGB order -> 0xABGR
     //0xffe6f8da, 0xff99c886, 0xff437969, 0xff051f2a
     //0xffffffff, 0xffaaaaaa, 0xff555555, 0xff000000,
 ];
 Display.colorPalette = Array.from(Array(0x8000), (v, k) => {
+    
+    /*
     const b = Math.floor((k >> 10) * 0xff / 0x1f);
     const g = Math.floor(((k & 0x3e0) >> 5) * 0xff / 0x1f);
     const r = Math.floor((k & 0x1f) * 0xff / 0x1f);
-    return 0xff000000 | (b << 16) | (g << 8) | r;
+    //return 0xff000000 | (b << 16) | (g << 8) | r;
+    */
+    const b = (k >> 10) & 0x1F;
+    const g = (k >> 5) & 0x1F;
+    const r = k & 0x1F;
+	return 0xff000000 | ((r * 3 + g * 2 + b * 11) >> 1) << 16 | (g * 3 + b) << 9 | (r * 13 + g * 2 + b) >> 1;
 });
 Display.modes = {
     hblank: 0,
@@ -3255,15 +3262,36 @@ class Sound {
         right *= (this.rightVolume + 1) / 8;
 
         const idx = (this.cycles / Sound.cyclesPerSample) % this.bufferLen;
-        this.bufferLeft[idx] = left / Sound.channelCount;
-        this.bufferRight[idx] = right / Sound.channelCount;
+        this.bufferLeft[idx] = left / Sound.channelCount + Sound.ctxKeeper;
+        this.bufferRight[idx] = right / Sound.channelCount + Sound.ctxKeeper;
   
         if(((this.cycles / Sound.cyclesPerSample) % Sound.bufferSamples) == (Sound.bufferSamples - 1)) {
-            Atomics.add(this.filled, 0, Sound.bufferSamples);
+            const old = Atomics.add(this.filled, 0, Sound.bufferSamples);
+            console.log("fill: " + (old + Sound.bufferSamples));
         }
     }
 
     pushBuffer() {
+        const now = (performance.now()/1000);
+        const nowPlusDelay = now + Sound.bufferDuration;//Sound.latency;
+        this.nextPush = this.nextPush || nowPlusDelay;
+        //console.log("after: " + this.nextPush.toFixed(3));
+        if (now <= this.nextPush) {
+            const old = Atomics.add(this.filled, 0, Sound.bufferSamples);
+            console.log((now - this.pastTime).toFixed(3) + " " + (this.nextPush - now).toFixed(3) + " fill: " + (old + 4096));
+ 
+            /*
+                bufferSource.start(this.nextPush);
+            */
+            this.nextPush += Sound.bufferDuration;
+
+            //this.nextPush = now + Sound.bufferDuration;
+            //console.log("before: " + this.nextPush.toFixed(3));
+        } else {
+            console.log("skip");
+            this.nextPush = nowPlusDelay;
+        }
+        this.pastTime = now;
         /*
         const now = Sound.ctx.currentTime;
         const nowPlusDelay = now + Sound.latency;
@@ -3323,8 +3351,8 @@ Sound.waveFrequency = Sound.frequency / 2;//2097152;
 Sound.cyclesPerWave = Sound.frequency / Sound.waveFrequency;
 Sound.bufferSamples = Sound.frequency / 1024;//4096;
 Sound.sampleFrequency = Sound.frequency / 64;//65536;
-Sound.bufferDuration = Sound.bufferSamples / Sound.sampleFrequency;
-Sound.latency = 0.125;
+Sound.bufferDuration = Sound.bufferSamples / Sound.sampleFrequency; // 0.0625
+Sound.latency = 0.125;  // (4096/65536)*2
 Sound.volume = 0.25;
 Sound.frameFrequency = Sound.frequency / (8192);//   Sound.frequency / 8192;   //512;
 Sound.cyclesPerFrame = Sound.frequency / Sound.frameFrequency;  // 8192
@@ -3344,7 +3372,7 @@ Sound.divisionRatios = [
     2, 4, 8, 12, 16, 20, 24, 28,
 ].map((value => value * Sound.cyclesPerCPUCycle));
 //Sound.ctx = new (window.AudioContext || window.webkitAudioContext)();
-
+Sound.ctxKeeper = 0.000001;
 
 /***/ }),
 
@@ -4120,6 +4148,8 @@ class Mutex {
 /******/ 	
 /************************************************************************/
 var __webpack_exports__ = {};
+// This entry needs to be wrapped in an IIFE because it needs to be isolated against other modules in the chunk.
+(() => {
 /*!*********************************!*\
   !*** ./public/js/emulworker.js ***!
   \*********************************/
@@ -4168,7 +4198,8 @@ let sharedCurrentSizeBuffer;
 let sharedCurrentSize;
 
 function saveLog(...args) {
-  saveLogImpl(...args);
+  //saveLogImpl(...args);
+  //console.log(args.join(' '));
 }
 
 function saveLogImpl(...args) {
@@ -4242,31 +4273,37 @@ self.onmessage = event => {
       }
       */
 
+      
       if(delayGap <= 0) { // repay armotized delay by skipping the wait time
-        saveLog("**** 1      : Gap1 is exceed 16.74");
+        //console.log("**** 1      : Gap1 is exceed 16.74");
         preStart();
         saveLog("**** 1      break");
         return;
       }      
       
       if(leftDelayTime <= 0) { // repay armotized delay by skipping the wait time
-        saveLog("****  2     : travel Time used all delayGap");
+        //console.log("****  2     : travel Time used all delayGap");
         preStart();
         saveLog("****  2     break");
         return;
       }
 
+      
       if(leftDelayTime > 4) {
-        saveLog("****   3    : more than 4ms call SetTimeout ");
+        //console.log("****   3    : more than 4ms call SetTimeout ");
         setTimeout(() =>  preStart(), leftDelayTime);
         saveLog("****   3    break");
         return;
       } 
 
-      saveLog("****    4   : left delay is less than and equal four. " + leftDelayTime.toFixed(3));
+      
+      //console.log("****    4   : left delay is less than and equal four. " + leftDelayTime.toFixed(3));
       preStart();
       saveLog("****    4   break");
+      
 
+     //setTimeout(() =>  preStart(), leftDelayTime);
+     //setTimeout(() =>  preStart(), delayGap);
       return;
     case 'start':
       noDelayUpdate();
@@ -4311,7 +4348,8 @@ function noDelayUpdate() {
   _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime = startTime;
   const gap0 = startTime - past;
   //saveLog("start time: ", startTime.toFixed(3));
-  saveLog("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white")
+  
+  //console.log("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white")
 
  if (paused || !running) {
         return;
@@ -4354,6 +4392,8 @@ function noDelayUpdate() {
             }
             
             
+            
+            
         } catch (error) {
             console.error(error);
             running = false;
@@ -4369,33 +4409,56 @@ function noDelayUpdate() {
     const current = performance.now();
     past = current;
     const gap1 = current-startTime;
-    saveLog("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:orange; color:black");
+    //console.log("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:green; color:white");
 
 
     if(fps > 59) {
-      saveLog(fps + " fps over 59, reset old delay 0")
+      saveLog(fps + " fps over 59, reset old delay 0");
       isInitUpdate = true; // reset delay
     }
     
+    /*
     if(isInitUpdate) {
+      console.log("init");
       isInitUpdate = false;
       next = current;
-      delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
+      delayGap = Display.frameInterval - gap1;
     } else {
 
       // amortized
-      next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
+      next += Display.frameInterval; //next += 16.74 or 8.37
       delayGap = next - current;
-      
-      // not amortized
-      /*
-      if((delayGap > 0) && (gap0 > delayGap)) {
-        delayGap = Display.frameInterval - (gap0 - delayGap) - gap1;
-      } else {
-        delayGap = Display.frameInterval - gap1;
-      }
-      */
+    
+                            // not amortized
+                            /*
+                            if((delayGap > 0) && (gap0 > delayGap)) {
+                              delayGap = Display.frameInterval - (gap0 - delayGap) - gap1;
+                            } else {
+                              delayGap = Display.frameInterval - gap1;
+                            }
+                            */
+    //}
+    
+
+    if(!setFirstNext) {
+      setFirstNext = true;
+      firstNext = current;
+      next = current;
+      delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
+      isInitUpdate = false;
+      setTimeout(update, delayGap);
+      return;
     }
+  
+    if(isInitUpdate) {
+      console.log("init");
+      isInitUpdate = false;
+      next = Math.floor((current-firstNext)/_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval)*_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval + firstNext;
+    }
+     
+    next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
+    delayGap = next - current;
+
 
     self.postMessage({ // recvQ
       msg: 'M',
@@ -4511,7 +4574,7 @@ function paint(callTime) {
 }
 
 
-function update() {
+function updateOG() {
   const startTime = performance.now();
   const gap0 = startTime - past;
   saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
@@ -4730,6 +4793,106 @@ function loadAndStart(payload) {
     console.error(error);
   }
 }
+
+let setFirstNext = false;
+let firstNext = 0;
+
+function update() {
+  const startTime = performance.now();
+
+  if (paused || !running) {
+      return;
+  }
+  if (gb.cartridge.hasRTC) {
+      gb.cartridge.rtc.updateTime();
+  }
+  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+      try {
+          cycles += gb.cycle();
+      } catch (error) {
+          console.error(error);
+          running = false;
+          return;
+      }
+  }
+  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+  const current = performance.now();
+  
+  fps++;
+
+  if(fps > 59) {
+    isInitUpdate = true; // reset delay
+  }
+  
+  const gap1 = current-startTime;
+
+  /**
+   *   never init
+   * 
+   */
+  isInitUpdate = false;
+
+  
+  if(isInitUpdate) {
+    console.log("init");
+    isInitUpdate = false;
+
+    next = current;
+    delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
+  } else{
+    next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
+    delayGap = next - current;
+  }
+  
+
+  /*
+  if(!setFirstNext) {
+    setFirstNext = true;
+    firstNext = current;
+    next = current;
+    delayGap = Display.frameInterval - gap1;
+    isInitUpdate = false;
+    setTimeout(update, delayGap);
+    return;
+  }
+
+  if(isInitUpdate) {
+    console.log("init");
+    isInitUpdate = false;
+    next = Math.floor((current-firstNext)/Display.frameInterval)*Display.frameInterval + firstNext;
+  }
+  
+  next += Display.frameInterval; //next += 16.74 or 8.37
+  delayGap = next - current;
+  */
+  setTimeout(update, delayGap);
+}
+
+    /**
+     *                                        next=current
+     *                                         |-------|-------|
+     *    |----g--|----g--|----g--|----g--|xxxxg--|-------|-------|
+     */
+    /**
+     *  1. delayGap 이 벌어지는 걸(채무 늘어나는 것) 초기화하려고 한 로직?
+     *     아니다. speed 줄이려고 만든 로직이다. 즉, delayGap 청산 하고 새로 시작.
+     * 
+     *  2. next 위치 초기화 하는 거랑 속도 제한이랑(fps > 59 로 측정) 무슨 상관인가?
+     *     delayGap 청산 하고 새로 시작.
+     *     
+     *  3. delayGap 만 날려버리면 될텐데. next 기준점은 옮기지 않고.
+     *     하지만 now() 와 next + 16.74*n 을 가지고 어떻게 지금 위치로 next + 16.74*x 복귀시키지?
+     *     --> next -= 16.74*y
+     *   
+     *         next = firstNext + 16.74*y
+     *         y = (now()-firstNext)/16.74
+     *     
+     *  4. 질주시켜도 delayGap 상환 다 안 되나? 아, fps 59(59번)으론 상환하기 부족하구나.
+     *     
+     *  5. sound.js에서 (this.nextPush - now) 갭 차이가 점점 커졌던거는 
+     *     위의 next=current 를 반복 해주는 동안 점점 기준점이 단축되기 때문?
+     */
+})();
 
 /******/ })()
 ;
