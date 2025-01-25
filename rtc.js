@@ -35421,17 +35421,16 @@ function mouseHandler(ev) {
   let keyNumber;
   if (childDiv) {
       keyNumber = childDiv.getAttribute('data-child-number'); // Get the child's number
-      console.log('mouse down: ' + ev.button + ', child number: ' + keyNumber); // Log when mouse button is pressed
   } else {
     return;
   }
 
   switch (ev.type) {
-    case 'mousedown':
+    case 'touchstart':
       keyBuffer[keyNumber] = true;
-      saveMainLog("mouseDown: " + keyNumber);
+      //saveMainLog("mouseDown: " + keyNumber);
       break;
-    case 'mouseup':
+    case 'touchend':
       keyBuffer[keyNumber] = false;
       break;
   }
@@ -35439,12 +35438,12 @@ function mouseHandler(ev) {
 
 const parentDiv = document.querySelector('.parentDiv');
 
-parentDiv.addEventListener('mousedown', (ev) => {
+parentDiv.addEventListener('touchstart', (ev) => {
   messageQueue.push({callback: mouseHandler, event: ev});
   processNextMessage();
 });
 
-parentDiv.addEventListener('mouseup', (ev) => {
+parentDiv.addEventListener('touchend', (ev) => {
   messageQueue.push({callback: mouseHandler, event: ev});
   processNextMessage();
 });
