@@ -23,8 +23,15 @@
     <!-- script defer src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js"></script -->
 
+  <!-- link href="gameboy.css" rel="stylesheet" -->
   <meta name="viewport" content="width=device-width">
-<script defer src="coi.js"></script><script defer src="emul.js"></script><script defer src="soundprocessor.js"></script><script defer src="rtc.js"></script><link href="rtc.css" rel="stylesheet"></head>
+
+  <style>
+
+
+
+  </style>
+<script defer src="coi.js"></script><script defer src="emul.js"></script><script defer src="soundprocessor.js"></script><script defer src="rtc.js"></script><script defer src="log.js"></script><link href="rtc.css" rel="stylesheet"></head>
 
 <body class="bg-light text-dark">
 
@@ -44,9 +51,16 @@
         <button id="printLogBtn">
           print log
         </button>
+        <buttion id="copyBtn">
+          copy room id
+        </buttion>
+        <button id="pingCheckerBtn"></button>
+          ping check
+        </button>
     </div>
     <div>
         <span id="currentRoom"></span>
+        <input id="roomId" type="hidden">
     </div>
     
   
@@ -82,17 +96,6 @@
     </div>
     
 
-
-
-
-
-
-
-
-
-
-
-
 <div class="container-fluid my-3">
   <div class="row">
     <canvas id="waveform" width="1900" height="800"></canvas>
@@ -111,6 +114,24 @@
                 <canvas id="canvas" class="d-block w-100"
                         style="image-rendering: crisp-edges; image-rendering: pixelated;"></canvas>
               </div>
+
+              <div class="gameboy parentDiv">
+                <div class=arrow>
+                  <div class="left childDiv" data-child-number="6"></div>
+                  <div class="up childDiv" data-child-number="5"></div>
+                  <div class="right childDiv" data-child-number="7"></div>
+                  <div class="down childDiv" data-child-number="4"></div>
+                </div>
+                <div class=ab>
+                  <div class="abutton childDiv" data-child-number="3">A</div>
+                  <div class="bbutton childDiv" data-child-number="2">B</div>
+                </div>
+                <div class=optionbutton>
+                    <div class="selbutton childDiv" data-child-number="0">sel</div>
+                  <div class="startbutton childDiv" data-child-number="1">start</div>
+                </div>
+                </div>
+                
               <div class="container my-3 px-0">
                 <label for="startDemoButton" class="btn btn-dark w-100">Start Demo</label>
               </div>
@@ -120,6 +141,7 @@
               <input type="button" id="startDemoButton" class="d-none"/>
               <input type="file" id="romFileInput" accept=".gb, .gbc" class="d-none"/>
             </div>
+
             <div class="col-md">
               <div class="accordion my-3 bg-white" id="controlAccordion">
                 <div class="accordion-item">

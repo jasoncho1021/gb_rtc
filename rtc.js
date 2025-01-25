@@ -34251,6 +34251,18 @@ __webpack_require__.r(__webpack_exports__);
 
 /***/ }),
 
+/***/ "./public/gameboy.css":
+/*!****************************!*\
+  !*** ./public/gameboy.css ***!
+  \****************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+// extracted by mini-css-extract-plugin
+
+
+/***/ }),
+
 /***/ "./public/mcw.css":
 /*!************************!*\
   !*** ./public/mcw.css ***!
@@ -34271,6 +34283,8 @@ __webpack_require__.r(__webpack_exports__);
 
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   pingChecker: () => (/* binding */ pingChecker),
+/* harmony export */   printLogAll: () => (/* binding */ printLogAll),
 /* harmony export */   webSocketOnMessage: () => (/* binding */ webSocketOnMessage)
 /* harmony export */ });
 /* harmony import */ var _rtc_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../rtc.js */ "./public/rtc.js");
@@ -34284,6 +34298,7 @@ __webpack_require__.r(__webpack_exports__);
 
 const worker = new Worker('emul.js', { type: 'module' });
 //const worker = new Worker('./js/emulworker.js', { type: 'module' });  //for public
+const logger = new Worker('log.js', { type: 'module'});
 
 const latency = 0.125;
 const bufferSamples = 4096;
@@ -34336,6 +34351,9 @@ const waitForSc = new Int32Array(waitScBuffer);
 let waitForIO = false;
 let receivedSb;
 
+const waitC1Buffer = new SharedArrayBuffer(4);
+const waitForC1 = new Int32Array(waitC1Buffer);
+
 let sendSb;
 
 const scMonitor = new Int32Array(scMonitorStartSharedBuffer);
@@ -34345,6 +34363,89 @@ const messageQueue = [];
 const mu = new _sync_js__WEBPACK_IMPORTED_MODULE_2__.Mutex();
 
 let startTime = 0;
+
+const writeBuffer = new SharedArrayBuffer(4);
+const writeLock = new Int32Array(writeBuffer);
+
+const postBuffer = new SharedArrayBuffer(4);
+const postLock = new Int32Array(postBuffer);
+
+function saveMainLog(...args) {
+  const message = args.join(' ');
+  const enterId = _logger_js__WEBPACK_IMPORTED_MODULE_1__.orderLock.getId();
+  const line = "[main] : " + enterId + " $ " + message
+  logger.postMessage({option:0, data:line});
+}
+
+function printLogAll() {
+  if(soundWorklet) {
+    soundWorklet.port.postMessage({
+         msg: 'stop',
+         payload: -1
+    });
+    
+    soundWorklet.disconnect(); // Disconnect the AudioWorkletNode from the gain node
+    soundWorklet.port.close(); // Close the port to stop communication with the worklet
+    soundWorklet = null; // Clear the reference to the AudioWorkletNode
+    console.log("AudioWorklet stopped.");
+  }
+
+  worker.postMessage({
+    msg: 'stop',
+    payload: -1
+  });
+
+  logger.postMessage({option:1, data:-1});
+}
+
+let pingSend;
+function pingChecker() {
+  let count = 0;
+  const intervalId = setInterval(() => {
+    if(count++ == 5) {
+      clearInterval(intervalId);
+      return;
+    }
+    pingSend = Date.now();
+    sendMessage("P 0");
+  }, 1000);
+}
+
+logger.onmessage = e => {
+  const outputLines = e.data;
+  const formattedOutput = outputLines.join('\r\n'); // Add CRLF to each line
+  saveVariableDataAsFile(formattedOutput, 'emullog.txt');
+  
+  /*
+  console.log("write log");
+  outputLines.forEach((line) => {
+    console.log(line);
+  });
+  console.log("fin");
+  */
+}
+
+function saveVariableDataAsFile(data, filename) {
+    // Create a Blob from the data
+    const blob = new Blob([data], { type: 'text/plain' }); // Change type as needed (e.g., 'application/json' for JSON data)
+  
+    // Create a link element
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); // Create a URL for the Blob
+    link.download = filename; // Set the file name for the download
+  
+    // Append the link to the body (not necessary for the download to work)
+    document.body.appendChild(link);
+  
+    // Programmatically click the link to trigger the download
+    link.click();
+  
+    // Clean up and remove the link
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href); // Free up memory
+}
+  
+
 function processNextMessage() {
   if (messageQueue.length > 0) {
     const {callback, event} = messageQueue.shift();
@@ -34354,8 +34455,6 @@ function processNextMessage() {
 }
 
 function webSocketOnMessage(event) {
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "<OnMessage> :" + (performance.now() - startTime).toFixed(3));
-  
   messageQueue.push({callback: webSocketHandler, event: event});
   processNextMessage();
 }
@@ -34365,75 +34464,33 @@ worker.onmessage = event => {
   processNextMessage();
 };
 
-function waitScHandler(e){
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("wait sc handler");
-  if(Atomics.load(waitForSc, 0) === 0) {
-    (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("not yet set sc 128, wait for sc");
-    /*
-      is it right that secondRecvQueue value unshift to waitScQueue?
-      is it always ordered?
-    */
-    waitScQueue.unshift({callback: waitScHandler, event: e});
-    return;
-  }
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("after sc");
-
-  sendSb = Atomics.load(sb, 0);
-  sendMessage("R " + sendSb);
-
-  lapsSendR = performance.now();
-
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[R-2] recvQ ~ sendR :", (lapsSendR - recvQtime).toFixed(3));
-
-  recvQflag = true;
-
-  blocking();
-  const obj = JSON.parse(e.data);
-  receivedSb = parseInt(obj.msg, 10);
-  setSlave(receivedSb);
-  releasing();
-
-  const completeQtime = performance.now();
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[R-3] recvQ ~ setSlave :", (completeQtime - recvQtime).toFixed(3));
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[R-4] startTime ~ setSlave :", (completeQtime - startTime).toFixed(3));
-}
-
 function sendMessage(msg) {
   const output = _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendTransfer(msg);
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)(output);
+  saveMainLog(output);
 }
 
 let waitScQueue = [];
 
-let laps = 0;
-let lapsSendQ = 0;
-let lapsSendR = 0;
-let recvQtime = 0;
-
-let recvQflag = false;
-
-
-let currentGap = -1;
-
-
 let sendQflag = false;
 
 let waitTsQueue = [];
-let secondRecvQqueue = [];
 let skipRequestCount = 0;
+
+let waitC1Queue = [];
 
 function waitTsHandler(){
   sendMessage("TS timestamp");
   (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("TS to network");
 }
 
-function recvQHandler(obj, e) {
-  recvQtime = performance.now();
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[R-1] startTime ~ recvQ :", (recvQtime - startTime).toFixed(3));
+let sendValue;
+let recvValue;
 
+function recvQHandler(recvSb) {
+  
   if(Atomics.load(waitForSc, 0) === 0) {
-    (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("%c push to waitScQueue", "background:purple; color:white");
-    waitScQueue.push({callback: waitScHandler, event: e});
+    saveMainLog("push to waitScQueue");
+    waitScQueue.push({callback: waitScHandler, recvSb: recvSb});
     /*
       'netRole == 0 (starter) case : recvQ after sendTS'
       (sendTS  1) 
@@ -34442,44 +34499,139 @@ function recvQHandler(obj, e) {
        save to waitSC
        releasing
     */
-    releasingTimestampLock();
+    if(Atomics.load(timestampLock, 0) === 1) {
+      saveMainLog("release by self, there is waitSc");
+      sendMessage("K skip");
+      releasingTimestampLock();
+    }
+
     mu.unlock();
     return;
   }
 
-  if(recvQflag == true) {
-    (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("%c push to 2nd recvQ in this frame.", "background:purple; color:white");
-    secondRecvQqueue.push({callback: waitScHandler, event: e});
-    releasingTimestampLock();
-    mu.unlock();
-    return;
-  }
+  /*  
+      후속 waitC1 필요.
+      1) self sb 없으면 
+      2) recvSb == 195 이면
+  */
+  if(isSelfSetSb == false || c1Value == 0) { 
+    if(isC1Empty()) {
+      saveMainLog("push to waitC1Queue");
+      waitC1Queue.push({callback: waitC1Handler, recvSb: recvSb});
 
-  sendSb = Atomics.load(sb, 0);
-  sendMessage("R " + sendSb);
+      if(Atomics.load(timestampLock, 0) === 1) {
+        saveMainLog("release by self, there is waitC1");
+        sendMessage("K skip");
+        releasingTimestampLock();
+      }
+
+      mu.unlock();
+      return;
+    }
+  }
   
-  lapsSendR = performance.now();
-
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[R-2] recvQ ~ sendR :", (lapsSendR - recvQtime).toFixed(3));
-
-  recvQflag = true;
-
-  blocking();
-  receivedSb = parseInt(obj.msg, 10);
-  setSlave(receivedSb);
-  releasing();
-
-  const completeQtime = performance.now();
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[R-3] recvQ ~ setSlave :", (completeQtime - recvQtime).toFixed(3));
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[R-4] startTime ~ setSlave :", (completeQtime - startTime).toFixed(3));
-
+  /*
+      if(isSelfSetSb == true && c1Value > 0)
+      self sb 있으면서 c1Value > 0 후속 waitC1 없이 sendR
+  */
+  saveMainLog("recvQHandler block");
+  const currentSb = Atomics.load(sb, 0);
+  processRecvQ(recvSb, currentSb);
+  saveMainLog("recvQHandler release");
+ 
   mu.unlock();
 }
 
+function waitScHandler(recvSb, readySb){
+  saveMainLog("waitScHandler block");
+  processRecvQ(recvSb, readySb);
+  saveMainLog("waitScHandler release");
+}
+
+function waitC1Handler(recvSb, readySb) {
+  saveMainLog("waitC1Handler block");
+  processRecvQ(recvSb, readySb);
+  saveMainLog("waitC1Handler release");
+}
+
+function processRecvQ(receivedSb, readySb) {
+
+  /*
+      p 4b 8a
+      p 40 40
+  */
+  if((recvValue == 75 && sendValue == 138) &&
+  (receivedSb != 64 || readySb != 64)) {
+      //어떤 락을 해제시켜야하나?
+      saveMainLog("not 40 ready after recv 4b");
+      waitC1Queue.unshift({callback: waitC1Handler, recvSb: receivedSb});
+
+      if(Atomics.load(timestampLock, 0) === 1) {
+        saveMainLog("release by self, not 40 for 4b");
+        console.log("release by self, not 40 for 4b");
+        sendMessage("K skip");
+        releasingTimestampLock();
+      }
+
+      return;
+  } 
+
+  blocking();
+  
+  setSlave(receivedSb);
+
+  saveMainLog("packet [ P 0x" + receivedSb.toString(16) + " 0x" + readySb.toString(16) + " ]");
+  /*
+    bypass the MarioTennis init exchanges ..
+    p c1 c0
+    p c1 00
+        :
+    p c1 00
+    --------    
+    p c1 c2
+  */
+  consumeC1();
+
+  if((receivedSb == 193 && readySb == 192) || (receivedSb == 193 && readySb == 0)) {
+    produceC1();
+  } 
+
+  sendValue = readySb;
+  recvValue = receivedSb;
+
+  if(isSelfSetSb) {
+    isSelfSetSb = false;
+    releaseWriteLock();
+  }
+
+  exchanged = true;
+
+  releasing();
+
+  sendMessage("R " + readySb);
+}
+
 function recvTsHandler() {
+
   if(sendQflag) {
     /*
       follower process after recvR
+
+    [case 1]
+        s                              f
+     sendTS // block TSLock        sendQ    // block MainLock
+     recvQ  // waitsc              recvTS'  // push to waitTsQueue
+     sendK  // release TSLock      recvK    // skipCount++
+     sendR                         recvR'   // release MainLock
+                                   skipWaiting'  // reachPeriod
+
+    [case 2]
+        s                              f
+     sendTS // block TSLock        sendQ    // block MainLock
+     recvQ                         recvTS'  // push to waitTsQueue
+     sendR                         recvR'   // release MainLock
+     recvTS // release TSLock      waitTsHandler'  // reachPeriod
+
     */
     waitTsQueue.push({callback: waitTsHandler});
     mu.unlock();
@@ -34498,7 +34650,7 @@ function recvTsHandler() {
   } else if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole === 1) { // follower recvTS
 
     if(reachPeriod) {
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("netRole 1, already reach Period");
+      saveMainLog("netRole 1, already reach Period");
       /*
           follower faster than starter
       */
@@ -34506,11 +34658,16 @@ function recvTsHandler() {
       waitTsHandler();
       releasingTimestampLock();
     } else {
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("netRole 1, not yet reach Period");
+      saveMainLog("netRole 1, not yet reach Period");
       /*
           starter faster than follower
       */
       waitTsQueue.push({callback: waitTsHandler});
+
+      if(isWriteLockBlocking()) {
+        sendMessage("F atRcvTsHndlr");
+      }
+      
     }
 
   } else if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole === -1) {
@@ -34520,31 +34677,47 @@ function recvTsHandler() {
   mu.unlock();
 }
 
+let isSelfSetSb = false;
+let firstRecvQ = false;
+
 function webSocketHandler(e) {
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("RECV " + e.data);
+  saveMainLog("RECV " + e.data);
+  //saveMainLog("interrupt flag at RECV: " + (Atomics.load(interruptFlag, 0)).toString(2));
 
   const obj = JSON.parse(e.data);
   switch (obj.type) {
+    case 'P':
+      if(obj.msg == "0") {
+        sendMessage("P 1");
+        return;
+      }
+     
+      console.log("ping: ", Date.now() - pingSend);
+
+      break;
     case 'Q':
+      firstRecvQ = true;
       /*
         [TODO]
         if the user alreay start 1p game, 
         it should be reloaded and then process this Q
       */
-
-      getAsyncLock(recvQHandler, obj, e);
+      const recvData = obj.msg.split("/");
+      if(recvData[1] == 'false') {
+        saveMainLog("retransmitted");
+      }
+      getAsyncLock(recvQHandler, parseInt(recvData[0], 10));
       break;
     case 'R':
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[Q-A] sendQ ~ recvR : ", (performance.now() - lapsSendQ).toFixed(3));
-
       sendQflag = false;
 
       setMaster(parseInt(obj.msg, 10));
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[Q-2] startTime ~ recvR + processing :", (performance.now() - startTime).toFixed(3));
       /*
         for blocking from serial
       */
       releasing();
+      saveMainLog("webSocketHanlder R release");
+
 
       break;
     case 'K':
@@ -34552,12 +34725,22 @@ function webSocketHandler(e) {
       (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("skipRequestCount: ", skipRequestCount);
       break;
     case 'TS':
-      //mu.spinlock();
       getAsyncLock(recvTsHandler);
+      break;
+    case 'F':
+      getAsyncLock(recvSelfBlockingResponseHandler);
       break;
     default:
       (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("nothing");
   }
+}
+
+let recvF = false;
+function recvSelfBlockingResponseHandler() {
+  recvF = true;
+  sendMessage("K skip");
+  releasingTimestampLock();
+  mu.unlock();
 }
 
 function skipWaiting() {
@@ -34583,14 +34766,57 @@ function skipWaiting() {
     recv R
     reach PERIOD // skip, (do nothing)
   */
-  //isPossibleToSkip = true;
 }
-
-let isPossibleToSkip = false;
 
 let fpsCount = 1;
 let redCount = 1;
 let reachPeriod = false;
+
+function isWriteLockBlocking() {
+  return (Atomics.load(writeLock, 0) === 1);
+}
+
+function blockWriteLock() {
+  Atomics.store(writeLock, 0, 1);
+  while(!isWriteLockBlocking()) {}
+  saveMainLog("block writeLock");
+}
+
+function releaseWriteLock() {
+  Atomics.store(writeLock, 0, 0);
+  Atomics.notify(writeLock, 0, 1);
+  saveMainLog("release writeLock");
+}
+
+function isPostLockBlocking() {
+  return (Atomics.load(postLock, 0) === 1);
+}
+
+function releasePostLock() {
+  Atomics.store(postLock, 0, 0);
+  Atomics.notify(postLock, 0, 1);
+  saveMainLog("release postLock");
+}
+
+function produceC1() {
+  Atomics.store(waitForC1, 0 ,1);
+  while(isC1Empty()) {
+  }
+}
+
+function consumeC1() {
+  Atomics.store(waitForC1, 0 ,0);
+  while(!isC1Empty()) {
+  }
+}
+
+function isC1Empty() {
+ return (Atomics.load(waitForC1, 0) === 0);
+}
+
+let isWriteUpdated = false;
+let c1Value = 0;
+let exchanged = false;
 
 function workerHandler(event) {
   const {msg, payload, time} = event.data;
@@ -34598,30 +34824,324 @@ function workerHandler(event) {
   (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)(    ">> From worker: " + msg + " " + payload + " " + time);
 
   switch (msg) {
+    case 'log':
+      logger.postMessage({option:0, data:payload});
+      break;
     case 'Q':
       /**
           send after blocking is applied.
           0 : not blocked
           1 : blocked
        */
+      saveMainLog("workerHandler before");
       while(Atomics.load(lock, 0) === 0) {
       }
+      saveMainLog("workerHandler after");
 
       sendSb = payload;
-      sendMessage("Q " + sendSb);
+      sendMessage("Q " + sendSb + "/" + isWriteUpdated);
 
       sendQflag = true;
+      isWriteUpdated = false;
+      recvF = false;
 
-      lapsSendQ = performance.now();
+      break;
+    case 'c1':
+      saveMainLog("onMessage c1: " + time + ", sb: " + payload + " waitC1Queue.len: " + waitC1Queue.length);
+     
+      saveMainLog("c1 before being locked");
+      while(!isPostLockBlocking()) {
+      }
+      saveMainLog("c1 after being locked");
 
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[Q-1] startTime ~ sendQ :", (lapsSendQ - startTime).toFixed(3));
+      isWriteUpdated = true;
+
+      c1Value = time;
+
+      produceC1();
+
+      if(isSelfSetSb) {
+        if(c1Value == 0) {
+          saveMainLog("[Exception] self, w0");
+          console.log("%c [Exception] self, w0", "background:red; color:white");
+          printLogAll();
+          releasePostLock();
+          return;
+        }
+
+        /*
+          c1Value > 0
+        */
+
+        /*
+           block writeLock
+        */
+        blockWriteLock();
+        releasePostLock();
+
+        if(waitC1Queue.length > 0) {
+          const {callback, recvSb} = waitC1Queue.shift();
+          callback(recvSb, payload); // releaseWriteLock at processRecvQ
+          return;
+        }
+
+        /*
+             blocking here ( self sb, write -> blocking )
+            
+            'not release write lock to use self set sb value before write'
+        */
+        /*
+            << recvTS from role 0
+            s
+            w  writelock block
+            sendF
+        */
+        if(waitTsQueue.length > 0) {
+          sendMessage("F atWrite");
+          return;
+        }
+
+        /*
+            netRole 0 (c) writeLock blocked
+            netRole 1 (j) timestamp blocked
+
+            cf    js
+            |     |
+                  |
+                  |
+          ----------
+        */
+        if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole == 0) {
+          sendMessage("F atWriteRole0");
+          return;
+        }
+      }
+      
+      /*
+          if(isSelfSetSb == false) 
+          
+          'serial routine'
+          jump
+            sc --> waitC1Q.push
+          RETI
+          w
+      */
+      if(waitC1Queue.length > 0) {
+        const {callback, recvSb} = waitC1Queue.shift();
+        callback(recvSb, payload);  // not releaseWriteLock at processRecvQ. sefsb == false
+      }
+      
+      releasePostLock();
+
+      break;
+    case 'sb': // set sb is called not in the serial handler
+      saveMainLog("onMessage sb: " + payload + " waitC1Queue.len: " + waitC1Queue.length);
+
+      saveMainLog("self sb before being locked");
+      while(!isPostLockBlocking()) {
+      }
+      saveMainLog("self sb after being locked");
+
+      isSelfSetSb = true;
+
+      if(!firstRecvQ) {
+        isSelfSetSb = false;
+      }
+
+      releasePostLock();
+
       break;
     case 'sc':
-      if(waitScQueue.length > 0) {
-        (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)('after sc from cpu');
-        const {callback, event} = waitScQueue.shift();
-        callback(event);
+      saveMainLog("sc before being locked");
+      while(!isPostLockBlocking()) {
       }
+      saveMainLog("sc after being locked");
+
+      /*
+          serial sc
+      */
+      if(exchanged) {
+
+        if(waitScQueue.length > 0) {
+          const {callback, recvSb} = waitScQueue.shift();
+
+          /*
+            => jump 보다  self sc 가 먼저 실행되면 waitScQueue 에 아이템 보게 됨.
+              p r s, recvQ, self sb, sc, jump 순 
+
+              w'
+              p r s
+                    << waitScQueue.push
+              s
+              sc    // waitScQueue.length > 0
+              jump
+             
+          */
+          /*
+            P r s     // exchange = true
+            
+            self sb
+            << recvQ  // waitScQueue.push
+            self sc   // skip by if(exchange) condition. serial sc must be the first. 
+
+            jump
+              sc      // if(exchange && isSelfSetSb), sendR
+            RETI
+
+          */
+          if(isSelfSetSb) {
+            saveMainLog("[Exception] selfsb: F, write: T  at serial? sc");
+            console.log("%c [Exception] selfsb: F, write: T  at serial? sc", "background:red; color:white");
+            if(c1Value > 0) {
+              blockWriteLock();
+              releasePostLock();
+              callback(recvSb, payload);
+              return;
+            }
+            /*
+                [case: w0 -> self sc -> serial sc]
+
+                P r s        // exchange = true
+                w 0
+                self sb
+                << recvQ    // waitScQueue.push
+                self sc     // skip
+
+                jump
+                  serial sc // waitC1Queue.push
+                RETI        // exchange = false;
+
+                w'          // waitC1Queue.shift
+            */
+            waitC1Queue.push({callback: waitC1Handler, recvSb: recvSb});
+            releasePostLock()
+            return;
+          }
+
+          if(isC1Empty()) {
+            /*
+              jump
+                sc --> waitC1Q.push
+              RETI
+            */
+            saveMainLog("push to waitC1Queue");
+            waitC1Queue.push({callback: waitC1Handler, recvSb: recvSb});
+          } else {
+            /*
+                [case 1]
+                P r s
+                << recvQ    // waitScQueue.push
+                w           // whoese ?
+                jump
+                  sc        // waitScQueue.length > 0
+                RETI
+
+                [case 2]
+                P r s
+                w           // whoese ?
+                << recvQ    // waitScQueue.push
+                jump
+                  sc        // waitScQueue.length > 0
+                RETI
+            */
+            saveMainLog("[Exception] selfsb: F, write: T  at serial? sc");
+            console.log("%c [Exception] selfsb: F, write: T  at serial? sc", "background:red; color:white");
+            printLogAll();
+          }
+        }
+
+        releasePostLock();
+        return;
+      }
+
+      if(isSelfSetSb) {
+        if(c1Value == 0) {
+          releasePostLock();
+          return;
+        }
+
+        /*
+            w'
+            p r s
+                  << recvQ // waitScQueue.push
+            jump
+              serial sc
+            RETI
+
+            self sb
+            self sc       // waitScQueue.length > 0    ,, sendR
+        */
+        if(waitScQueue.length > 0) {
+          saveMainLog("[Exception] waitScQueue.length > 0 at self sc");
+          console.log("%c [Exception] waitScQueue.length > 0 at self sc", "background:red; color:white");
+          //printLogAll();
+          const {callback, recvSb} = waitScQueue.shift();
+          callback(recvSb, payload);
+        }
+
+        /*  
+            w'
+                <<
+                p r s
+                <<
+            self
+
+         ==> w' 와 self sc 사이에 2 개 연달아 recvQ 들어오는 경우
+             self sc 할때 waitC1Queue.length > 0
+          
+          w'
+            << recvQ
+            P r s
+            serial sc
+            << recvQ  
+          self sc         // waitC1Queue.length > 0
+
+
+            [case 1]      
+            w'
+                  << recvQ
+            P r s
+                  << recvQ // waitScQueue.push
+            jump
+              sc           // waitC1Queue.push
+            RETI
+
+            s
+            sc
+            
+
+            [case 2]
+            w'  
+                  << recvQ
+            P r s
+            jump
+              sc
+            RETI
+                  << recvQ // waitC1Queue.push
+            s
+            sc
+        */
+        if(waitC1Queue.length > 0) {
+          saveMainLog("[Exception] waitC1Queue.length > 0 at self sc");
+          console.log("%c [Exception] waitC1Queue.length > 0 at self sc", "background:red; color:white");
+          //printLogAll();
+          const {callback, recvSb} = waitC1Queue.shift();
+          callback(recvSb, payload);
+        }
+      } 
+
+      releasePostLock();
+      
+      break;
+    case 'reti':
+      saveMainLog("RETI before being locked");
+      while(!isPostLockBlocking()) {
+      }
+      saveMainLog("RETI after being locked");
+
+      exchanged = false;
+
+      releasePostLock();
       break;
     case 'F':
       let element = document.querySelector('body > div.container-fluid.my-3 > div > div:nth-child(1)');
@@ -34637,44 +35157,36 @@ function workerHandler(event) {
 
       break;
     case 'M':
-      currentGap = 0;
-
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[END] startTime ~ end :", (performance.now() - startTime).toFixed(3));
-
-      recvQflag = false;
-
-      if(secondRecvQqueue.length > 0) {
-        (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)('process 2nd recvQ at next udpate()');
-        const {callback, event} = secondRecvQqueue.shift();   // recvQflag = true
-        callback(event);
-      }
-      //const isNextRecvQ = secondRecvQqueue.length > 0;
-
       worker.postMessage({
         msg: 'restart',
-        payload: -1//{isNextRecvQ: isNextRecvQ}
+        payload: -1
       });
       break;
     case 'T':
-      currentGap = 1;
-
-      startTime = performance.now();
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("(T)" + currentGap + "[SET] startTime set");
-
       worker.postMessage({
         msg: 'start',
         payload: -1
       });
       break;
     case 'ts':
+      saveMainLog("tslock before");
       while(Atomics.load(timestampLock, 0) === 0) {
       }
+      saveMainLog("tslock after");
 
       (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("tsIdx: " + payload + " pass spin lock");
       (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" reach PERIOD");
 
+      if(recvF) {
+        saveMainLog("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" do not wait, there is recvF, skip sendTS until sendQ.");
+        sendMessage("K skip");
+        releasingTimestampLock();
+        mu.unlock();
+        return;
+      }
 
       if(skipRequestCount > 0) {
+        saveMainLog("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" do not wait, there is skipRequestCount");
         skipWaiting();
         releasingTimestampLock();
         mu.unlock();
@@ -34691,15 +35203,15 @@ function workerHandler(event) {
         so both of them are stuck by sendQ and sendTS.
       */
       if(waitScQueue.length > 0) {
-        (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" do not wait, there is waitSC");
+        saveMainLog("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" do not wait, there is waitSC");
         sendMessage("K skip");
         releasingTimestampLock();
         mu.unlock();
         return;
       }
 
-      if(secondRecvQqueue.length > 0) {
-        (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" do not wait, there is 2nd RecvQ");
+      if(waitC1Queue.length > 0) {
+        saveMainLog("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" do not wait, there is waitC1");
         sendMessage("K skip");
         releasingTimestampLock();
         mu.unlock();
@@ -34708,7 +35220,7 @@ function workerHandler(event) {
 
       if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole === 0) {
         sendMessage("TS timestamp");
-        (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" TS to network");
+        saveMainLog("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" TS to network");
       } else if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole === 1) {
         
           if(waitTsQueue.length > 0) {
@@ -34719,12 +35231,12 @@ function workerHandler(event) {
             reachPeriod = false;
             callback();
             releasingTimestampLock();
-            (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" follower responds to TS arrived from starter");
+            saveMainLog("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" follower responds to fast starter");
           } else {
             /*
               follower faster than starter
             */
-            (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" follower waiting");
+            saveMainLog("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" follower waiting");
           }
 
       } else if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole === -1) {
@@ -34739,49 +35251,20 @@ function workerHandler(event) {
       
       mu.unlock();
       break;
-    case 'S':
-      //pushBuffer();
-      break;
     default:
       (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("nothing");
   }
 }
 
-let nextPush;
-function pushBuffer(){
-  //console.log('pushBuffer');
-  const now = ctx.currentTime;
-  const nowPlusDelay = now + 0.125;
-  nextPush = nextPush || nowPlusDelay;
-  if (nextPush >= now) {
-      const audioBuffer = ctx.createBuffer(numChannels, bufferSamples, sampleFrequency);
-      audioBuffer.getChannelData(0).set(audioLeftBuffer);
-      audioBuffer.getChannelData(1).set(audioRightBuffer);
-
-      const bufferSource = ctx.createBufferSource();
-      bufferSource.buffer = audioBuffer;
-      bufferSource.connect(gainNode);
-      bufferSource.start(nextPush);
-      nextPush += bufferDuration;
-
-      audioLeftBuffer.fill(0);
-      audioRightBuffer.fill(0);
-  } else {
-      nextPush = nowPlusDelay;
-  }
-}
-
-let soundCtx;// = new (window.AudioContext || window.webkitAudioContext)({sampleRate: sampleFrequency});
+let soundCtx;
 let soundWorklet;
 let gainNode;
-let lap, oldlap;
 function initSound(){
   soundCtx = new (window.AudioContext || window.webkitAudioContext)({sampleRate: sampleFrequency});
  
   gainNode = soundCtx.createGain();
   gainNode.gain.value = volume;
   gainNode.connect(soundCtx.destination);
-
 
   soundCtx.audioWorklet.addModule('soundprocessor.js').then(() => {
     const options = {
@@ -34790,19 +35273,21 @@ function initSound(){
     soundWorklet = new AudioWorkletNode(soundCtx, 'soundprocessor', options);
 
     soundWorklet.port.postMessage({
-      fillSab: soundFilledSab,
-      leftSab: soundLeftSab,
-      rightSab: soundRightSab,
-      bufferLen: soundBufferLen
+      msg: 'init',
+      payload: {
+        fillSab: soundFilledSab,
+        leftSab: soundLeftSab,
+        rightSab: soundRightSab,
+        bufferLen: soundBufferLen
+      }
     });
 
     soundWorklet.connect(gainNode);
 
     soundWorklet.port.onmessage = (event) => {
-      lap = soundCtx.currentTime;
-      //console.log("lap: "+ (lap-oldlap).toFixed(3));
-      oldlap = lap;
-      renderWaveform(event.data.waveform);
+      /*
+        renderWaveform(event.data.waveform);
+      */
     };
 
     if (soundCtx.state == 'suspended') {
@@ -34822,7 +35307,7 @@ function blocking() {
 function releasingTimestampLock() {
   Atomics.store(timestampLock, 0, 0);
   Atomics.notify(timestampLock, 0, 1);
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("-- main resumed timestamp lock");
+  saveMainLog("-- main resumed timestamp lock");
 }
 
 function getAsyncLock(callback, arg1, arg2) {
@@ -34857,29 +35342,29 @@ function printLog(flag, recv, send) {
 }
 
 function setMaster(value) {
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("[[set master start]] ", value);
   Atomics.store(sb, 0, value);
+  saveMainLog("++ set sb ", value);
 
   Atomics.store(sc, 0, 1);
+  saveMainLog("++ set sc ", 1);
 
   Atomics.or(interruptFlag, 0, 0x8);
 
-  Atomics.store(waitForSc, 0, 0);
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("[[set master end]]");
-  printLog("A", value, sendSb);
+  saveMainLog("packet [ A 0x" + value.toString(16) + " 0x" + sendSb.toString(16) +" ]");
 }
 
 function setSlave(value) {
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("[[set slave start]] ", value);
   Atomics.store(sb, 0, value);
+  saveMainLog("++ set sb ", value);
 
   Atomics.store(sc, 0, 0);
+  saveMainLog("++ set sc ", 0);
 
-  Atomics.or(interruptFlag, 0, 0x8);
+  const before = Atomics.or(interruptFlag, 0, 0x8);
+  saveMainLog("interrupt flag before at setSlave: " + before.toString(2));
+  saveMainLog("interrupt flag after at setSlave: " + (Atomics.load(interruptFlag, 0)).toString(2));
 
   Atomics.store(waitForSc, 0, 0);
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("[[set slave end]]");
-  printLog(" ", value, sendSb);
 }
 
 const startDemoButton = document.getElementById('startDemoButton');
@@ -34893,7 +35378,7 @@ startDemoButton.addEventListener('click', () => {
       }
     }
   });
-  xhr.open('GET', '/public/TennisWorld.gb'); // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
+  xhr.open('GET', '/public/MarioTennis.gbc'); // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
   xhr.send();
 });
 
@@ -34923,6 +35408,7 @@ function keyHandler(ev) {
   switch (ev.type) {
     case 'keydown':
       keyBuffer[keyValues[ev.code]] = true;
+      saveMainLog("keyDown: " + ev.code);
       break;
     case 'keyup':
       keyBuffer[keyValues[ev.code]] = false;
@@ -34930,8 +35416,47 @@ function keyHandler(ev) {
   }
 }
 
+function mouseHandler(ev) {
+  const childDiv = ev.target.closest('.childDiv'); // Replace '.childDiv' with your child div class
+  let keyNumber;
+  if (childDiv) {
+      keyNumber = childDiv.getAttribute('data-child-number'); // Get the child's number
+      console.log('mouse down: ' + ev.button + ', child number: ' + keyNumber); // Log when mouse button is pressed
+  } else {
+    return;
+  }
+
+  switch (ev.type) {
+    case 'mousedown':
+      keyBuffer[keyNumber] = true;
+      saveMainLog("mouseDown: " + keyNumber);
+      break;
+    case 'mouseup':
+      keyBuffer[keyNumber] = false;
+      break;
+  }
+}
+
+const parentDiv = document.querySelector('.parentDiv');
+
+parentDiv.addEventListener('mousedown', (ev) => {
+  messageQueue.push({callback: mouseHandler, event: ev});
+  processNextMessage();
+});
+
+parentDiv.addEventListener('mouseup', (ev) => {
+  messageQueue.push({callback: mouseHandler, event: ev});
+  processNextMessage();
+});
+
+
 function startGame(rom) {
   initSound();
+
+  /*
+      disable MarioTennis code 
+  */
+  //Atomics.store(waitForC1, 0, 1);
 
   const uInt8Array = new Uint8Array(rom);
   const canvasWorker = document.getElementById(
@@ -34960,7 +35485,10 @@ function startGame(rom) {
           soundLeftSab:soundLeftSab,
           soundRightSab:soundRightSab,
           fillSab: soundFilledSab,
-          bufferLen: soundBufferLen
+          bufferLen: soundBufferLen,
+          waitC1Buffer: waitC1Buffer,
+          writeBuffer: writeBuffer,
+          postBuffer: postBuffer
         }
       },
       [canvasWorker, uInt8Array.buffer]);
@@ -34973,8 +35501,6 @@ document.addEventListener('click', () => {
   }
 });
 */
-
-//initSound();
 
 const romFileInput = document.getElementById('romFileInput');
 let romFile;
@@ -35045,6 +35571,18 @@ function renderWaveform(buffer) {
 
 } 
 
+const copyBtn = document.querySelector('#copyBtn');
+copyBtn.addEventListener('click', () => {
+
+    const roomId = document.querySelector('#roomId').value;
+
+    navigator.clipboard.writeText(roomId).then(() => {
+        console.log('Current room copied to clipboard:', roomId);
+    }).catch(err => {
+        console.error('Failed to copy: ', err);
+    });
+})
+
 /***/ }),
 
 /***/ "./public/js/orderlock.js":
@@ -35064,7 +35602,7 @@ const unlocked = 0;
    INT_SIZE should be 2 to the power of n
    to use bitwise operation as modular operation.
 */
-const INT_SIZE = 16;
+const INT_SIZE = 32;
 const BIT_MOD = INT_SIZE - 1; 
 
 class OrderLock {
@@ -35930,10 +36468,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var firebase_firestore__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! firebase/firestore */ "./node_modules/firebase/firestore/dist/esm/index.esm.js");
 /* harmony import */ var _messenger_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./messenger.js */ "./public/messenger.js");
 /* harmony import */ var _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./js/adapter.js */ "./public/js/adapter.js");
-/* harmony import */ var _logger_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./logger.js */ "./public/logger.js");
-/* harmony import */ var bootstrap__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! bootstrap */ "./node_modules/bootstrap/dist/js/bootstrap.esm.js");
-/* harmony import */ var bootstrap_dist_css_bootstrap_min_css__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! bootstrap/dist/css/bootstrap.min.css */ "./node_modules/bootstrap/dist/css/bootstrap.min.css");
-/* harmony import */ var _mcw_css__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ./mcw.css */ "./public/mcw.css");
+/* harmony import */ var bootstrap__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! bootstrap */ "./node_modules/bootstrap/dist/js/bootstrap.esm.js");
+/* harmony import */ var bootstrap_dist_css_bootstrap_min_css__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! bootstrap/dist/css/bootstrap.min.css */ "./node_modules/bootstrap/dist/css/bootstrap.min.css");
+/* harmony import */ var _mcw_css__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ./mcw.css */ "./public/mcw.css");
+/* harmony import */ var _gameboy_css__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ./gameboy.css */ "./public/gameboy.css");
 /* harmony import */ var _material_ripple_index__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! @material/ripple/index */ "./node_modules/@material/ripple/component.js");
 /* harmony import */ var _material_dialog__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! @material/dialog */ "./node_modules/@material/dialog/component.js");
 
@@ -35943,10 +36481,11 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-
+//import { printLogAll } from "./logger.js";
 
  // This imports Bootstrap's JavaScript
  // This imports Bootstrap's CSS
+
 
 
 
@@ -36001,7 +36540,8 @@ function init() {
   //roomDialog = new mdc.dialog.MDCDialog(document.querySelector('#room-dialog'));
   roomDialog = new _material_dialog__WEBPACK_IMPORTED_MODULE_9__.MDCDialog(document.querySelector('#room-dialog'));
 
-  document.querySelector('#printLogBtn').addEventListener('click', _logger_js__WEBPACK_IMPORTED_MODULE_4__.printLogAll);
+  document.querySelector('#printLogBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.printLogAll);
+  document.querySelector('#pingCheckerBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.pingChecker);
 }
 
 let messenger = null;
@@ -36067,6 +36607,7 @@ async function createRoom() {
   document.querySelector(
       '#currentRoom').innerText = `Current room is [${roomRef.id}] - You are the caller!`;
   // Code for creating a room above
+  document.querySelector('#roomId').value = roomRef.id;
 
   // Listening for remote session description below
   //roomRef.onSnapshot(async snapshot => {

@@ -25,6 +25,780 @@ function customLog(...args) {
 
 /***/ }),
 
+/***/ "./public/js/emulworker.js":
+/*!*********************************!*\
+  !*** ./public/js/emulworker.js ***!
+  \*********************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   saveEmulLog: () => (/* binding */ saveEmulLog)
+/* harmony export */ });
+/* harmony import */ var _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./gb/cpu.js */ "./public/js/gb/cpu.js");
+/* harmony import */ var _gb_display_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./gb/display.js */ "./public/js/gb/display.js");
+/* harmony import */ var _sync_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./sync.js */ "./public/js/sync.js");
+/* harmony import */ var _orderlock_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./orderlock.js */ "./public/js/orderlock.js");
+/*
+importScripts('gb/cartridge.js',
+    'gb/cpu.js',
+    'gb/display.js',
+    'gb/joypad.js',
+    'gb/rtc.js',
+    'gb/serial.js',
+    'gb/sound.js',
+    'gb/timer.js',
+    'sync.js',
+    'orderlock.js',
+  '../dummylogger.js');
+*/
+
+
+ // Adjust based on actual exports
+ // Adjust based on actual exports
+
+
+//const { Mutex } = self; 
+//const { OrderLock } = self;
+
+let delayGap = 0;
+let timestampLock = 0;
+let mu;
+let orderLock;
+const maxSize = 1024 * 1024 * 1000;
+
+let sharedArray;
+let sharedBuffer;
+//let currentDataSize = 0; // Track the current size of data written
+
+// Initialize TextEncoder and TextDecoder once
+const txtEncoder = new TextEncoder();
+const txtDecoder = new TextDecoder();
+
+let sharedCurrentSizeBuffer;
+let sharedCurrentSize;
+
+function saveEmulLog(...args) {
+  //saveLogImpl(...args);
+  //console.log(args.join(' '));
+  const message = args.join(' ');
+  const enterId = orderLock.getId();
+  const line = "[    ] : " + enterId + " $ " + message;
+
+  self.postMessage({
+    msg: 'log',
+    payload: line,
+    time: -1
+  });
+}
+
+function saveLog(...args) {
+  
+}
+
+function saveLogImpl(...args) {
+  const enterId = orderLock.lock();
+  //console.log("emul [GET LOCK]");
+  const line = "[" + enterId + "] " + args.join(' ');
+  
+  let currentSize = Atomics.load(sharedCurrentSize, 0);
+  const encodedLine = txtEncoder.encode(line + '\n'); // Add newline for separation
+  const lineSize = encodedLine.length;
+
+  // Check if there is enough space in the buffer
+  if (currentSize + lineSize > maxSize) {
+      console.log('Buffer is full. Cannot add more data.');
+      orderLock.unLock();
+      return false; // Indicate that the buffer is full
+  }
+
+  // Store the encoded line in the buffer atomically
+  for (let i = 0; i < lineSize; i++) {
+      Atomics.store(sharedArray, currentSize + i, encodedLine[i]);
+  }
+
+  // Update the current size atomically
+  Atomics.add(new Int32Array(sharedBuffer), 0, lineSize); // Assuming the first 4 bytes of the buffer are used for currentSize
+  //currentSize += lineSize; // Update the current size
+  Atomics.add(sharedCurrentSize, 0, lineSize);
+
+  orderLock.unLock();
+  //console.log("emul [RELEASE LOCK]");
+  return true; // Indicate success
+}
+
+self.onmessage = event => {
+  const {msg, payload} = event.data;
+  switch (msg) {
+    case 'init':
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas = payload.canvas;
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.getContext('2d');
+      timestampLock = new Int32Array(payload.networkTimingBuffer);
+  
+      mu = _sync_js__WEBPACK_IMPORTED_MODULE_2__.Mutex.connect(payload.smu);
+
+      sharedBuffer = payload.buffer;
+      sharedArray = new Uint8Array(sharedBuffer);
+
+      sharedCurrentSizeBuffer = payload.currentSizeBuffer;
+      sharedCurrentSize = new Int32Array(sharedCurrentSizeBuffer);
+
+      orderLock = _orderlock_js__WEBPACK_IMPORTED_MODULE_3__.OrderLock.connect(payload.orderLock);
+
+      loadAndStart(payload);
+      break;
+    case 'restart':
+      const current = performance.now();
+      const travelTime = current-past;
+      const leftDelayTime = delayGap - travelTime;
+
+      saveLog("delayGap     : ", delayGap.toFixed(3));
+      saveLog("travelTime   : ", travelTime.toFixed(3));
+      saveLog("leftDelayTime: ", leftDelayTime.toFixed(3));
+
+      /*
+      if(payload.isNextRecvQ) {
+        saveLog("****0       : nextRecvQ is true");
+        preStart();
+        saveLog("****0       break");
+        return;
+      }
+      */
+
+      
+      if(delayGap <= 0) { // repay armotized delay by skipping the wait time
+        //console.log("**** 1      : Gap1 is exceed 16.74");
+        preStart();
+        saveLog("**** 1      break");
+        return;
+      }      
+      
+      if(leftDelayTime <= 0) { // repay armotized delay by skipping the wait time
+        //console.log("****  2     : travel Time used all delayGap");
+        preStart();
+        saveLog("****  2     break");
+        return;
+      }
+
+      
+      if(leftDelayTime > 4) {
+        //console.log("****   3    : more than 4ms call SetTimeout ");
+        setTimeout(() =>  preStart(), leftDelayTime);
+        saveLog("****   3    break");
+        return;
+      } 
+
+      
+      //console.log("****    4   : left delay is less than and equal four. " + leftDelayTime.toFixed(3));
+      preStart();
+      saveLog("****    4   break");
+      
+
+     //setTimeout(() =>  preStart(), leftDelayTime);
+     //setTimeout(() =>  preStart(), delayGap);
+      return;
+    case 'start':
+      noDelayUpdate();
+      return;
+    case 'stop':
+      running = false;
+      clearInterval(fpsInterval);
+      return;
+    default:
+      //saveLog(event);
+      console.log(event);
+  }
+};
+
+let gb;
+let cycles;
+let next;
+let paused = false;
+let running = false;
+
+let past;
+
+let oldUpdateGap = 0;
+let fps = 0;
+let isInitUpdate = true;
+
+let pastGap = 0;
+
+let timestamp = 0;
+let mainLock;
+let tsIdx = 0;
+
+function preStart() {
+  self.postMessage({
+    msg: 'T',
+    payload: -1,
+    time: -1
+  });
+}
+
+let cpuCycles = 0;
+const PERIOD = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame/4;
+
+function noDelayUpdate() {
+  const startTime = performance.now();
+  _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime = startTime;
+  const gap0 = startTime - past;
+  //saveLog("start time: ", startTime.toFixed(3));
+  
+  //console.log("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white")
+  saveEmulLog("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
+
+
+ if (paused || !running) {
+        return;
+    }
+    if (gb.cartridge.hasRTC) {
+        console.log("rtc");
+        gb.cartridge.rtc.updateTime();
+    }
+    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+        try {
+            cpuCycles = gb.cycle();
+            cycles += cpuCycles;
+            
+            /*
+              [TODO]
+              if the user try to start 1p,
+              this logic should be skipped
+            */
+            timestamp += cpuCycles;
+            if(timestamp >= PERIOD) {
+              timestamp = timestamp - PERIOD;
+
+              tsIdx = (tsIdx + 1) % 10;
+
+              
+              mu.lock();
+
+              self.postMessage({
+                msg: 'ts',
+                payload: tsIdx,
+                time: -1
+              });
+              saveLog("ts request " + tsIdx);
+              Atomics.store(timestampLock, 0, 1);
+              saveLog("ts blocked " + tsIdx);
+              Atomics.wait(timestampLock, 0, 1);
+              saveLog("ts unblocked " + tsIdx);
+              
+            }
+          
+        } catch (error) {
+            console.error(error);
+            running = false;
+            return;
+        }
+    }
+    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+    saveLog("over cycles: ", cycles);
+
+    fps++;
+
+
+    const current = performance.now();
+    past = current;
+    const gap1 = current-startTime;
+    //console.log("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:green; color:white");
+    saveEmulLog("[GAP1]        {s_____e}   = " + gap1.toFixed(3));
+
+
+    if(fps > 59) {
+      saveLog(fps + " fps over 59, reset old delay 0");
+      isInitUpdate = true; // reset delay
+    }
+    
+    /*
+    if(isInitUpdate) {
+      console.log("init");
+      isInitUpdate = false;
+      next = current;
+      delayGap = Display.frameInterval - gap1;
+    } else {
+
+      // amortized
+      next += Display.frameInterval; //next += 16.74 or 8.37
+      delayGap = next - current;
+    
+                            // not amortized
+                            /*
+                            if((delayGap > 0) && (gap0 > delayGap)) {
+                              delayGap = Display.frameInterval - (gap0 - delayGap) - gap1;
+                            } else {
+                              delayGap = Display.frameInterval - gap1;
+                            }
+                            */
+    //}
+    
+
+    if(!setFirstNext) {
+      setFirstNext = true;
+      firstNext = current;
+      next = current;
+      delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
+      isInitUpdate = false;
+      setTimeout(noDelayUpdate, delayGap);
+      return;
+    }
+  
+    if(isInitUpdate) {
+      console.log("init");
+      isInitUpdate = false;
+      next = Math.floor((current-firstNext)/_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval)*_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval + firstNext;
+    }
+     
+    next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
+    delayGap = next - current;
+
+
+    self.postMessage({ // recvQ
+      msg: 'M',
+      payload: -1,
+      time: -1
+    });
+}
+
+
+function oldUpdate() {
+  const startTime = performance.now();
+    const gap0 = startTime - past;
+    saveLog("%c [GAPx]    e}_ {s     e}   = " + pastGap.toFixed(3), "background:blue; color:white");
+    saveLog("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white");
+    if(pastGap > 0) {
+        saveLog("%c [GAPr]    e} _{s     e}   = " + (gap0-pastGap).toFixed(3), "background:green; color:white");
+    } else {
+        saveLog("%c [GAPr]    e} _{s     e}   = " + (gap0).toFixed(3), "background:green; color:white");
+    }
+
+    if (paused || !running) {
+        return;
+    }
+    if (gb.cartridge.hasRTC) {
+        gb.cartridge.rtc.updateTime();
+    }
+    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+        try {
+            cycles += gb.cycle();
+        } catch (error) {
+            console.error(error);
+            running = false;
+            return;
+        }
+    }
+    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+
+    fps++;
+
+    const current = performance.now();
+    const gap1 = current-startTime;
+    let nextGap;
+
+    
+    if(isInitUpdate) {
+      isInitUpdate = false;
+      next = current;
+      nextGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval-gap1;
+    } else {
+      next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
+      nextGap = next - current;
+    }
+    
+
+    // origin
+    //next += Display.frameInterval; //next += 16.74 or 8.37
+    //nextGap = next - current;
+    //
+
+
+    saveLog("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:orange; color:black");
+    saveLog("%c [GAP4]        {s     e}___= " + nextGap.toFixed(3), "color:blue");
+
+    past = current;
+
+    pastGap = nextGap;
+    
+    setTimeout(oldUpdate, nextGap);
+}
+
+let lastTime;
+function paint(callTime) {
+  saveLog("%c [GAP$] {s__}___{e  }   = " + (callTime - lastTime).toFixed(3), "background:green; color:white");
+  lastTime = callTime;
+
+  /*
+  const startTime = performance.now();
+  const gap0 = startTime - past;
+  saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
+  */
+  
+
+  if (paused || !running) {
+    return;
+  }
+  if (gb.cartridge.hasRTC) {
+    saveLog("%c RTC " , "background:black; color:white");
+    gb.cartridge.rtc.updateTime();
+  }
+
+  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+    try {
+      cycles += gb.cycle();
+    } catch (error) {
+      console.error(error);
+      running = false;
+      return;
+    }
+  }
+  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+
+  fps++;
+
+  /*
+  const current = performance.now();
+  const gap1 = current - startTime;
+  past = current;
+  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
+  */
+  
+
+  requestAnimationFrame(paint);
+}
+
+
+function updateOG() {
+  const startTime = performance.now();
+  const gap0 = startTime - past;
+  saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
+
+  if (paused || !running) {
+    return;
+  }
+  if (gb.cartridge.hasRTC) {
+    gb.cartridge.rtc.updateTime();
+  }
+
+  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+    try {
+      cycles += gb.cycle();
+    } catch (error) {
+      console.error(error);
+      running = false;
+      return;
+    }
+  }
+  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+
+  fps++;
+
+
+
+
+
+
+  /**
+         'loadAndStart'   'setTimeout'
+      next  : now,         now+16.74,         // ideal lap time
+      before: now,   now+x            now+y,
+
+
+     =========|=========|
+      (     )   (    )
+            <--       <--
+
+      updateGap = next - current
+     
+   */
+  /*
+  const current = performance.now();
+  const gap1 = current-startTime;
+  let updateGap;
+  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정
+    isInitUpdate = false;
+    next = current;
+    updateGap = Display.frameInterval-gap1;
+  } else {
+    next += Display.frameInterval; // +16.74ms
+    updateGap = next - current;
+  }
+  past = current;
+
+  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
+  saveLog("%c [GAPu] s}    {    e}<--= " + updateGap.toFixed(3), "background:green; color:white");
+  
+  setTimeout(() => update(), updateGap);
+*/
+
+
+
+  /*
+   const current = performance.now();
+   const setTimeoutGap = current-past;
+   past = current;
+   const updateGap = Display.frameInterval - setTimeoutGap;
+
+   saveLog("%c [GAP1]        {s-----e}   = " + (current-startTime).toFixed(3), "background:orange; color:black");
+   saveLog("%c [GAP2] {  s}--{------e}   = "+ setTimeoutGap.toFixed(3), "background:yellow; color:black");
+   saveLog("%c [GAP3} {  s--16.74---e}   = "+ updateGap.toFixed(3), "background:green; color:white");
+   */
+
+
+
+/**
+ *   (       )                (      )
+ * 
+ *           _________.........______xxxxx
+ * 
+ *           <------->                       oldUpdateGap     
+ *           <----------------->             gap0
+ *                             <----->       gap1
+ *           <----------------------->       gap2
+ *                                   <--->   updateGap
+ *                    <------->              realDelay
+ */
+
+  /**
+   * 
+   *                          if oldUpdateGap <= gap0
+   *                               (    )    (     )
+   *                                   <-->....
+   *                                   <------>
+   *                                updateGap = 16.74 - (gap0 - oldUpdateGap) - gap1;
+   *                          else
+   *                               (    )    (     )
+   *                                   <-------->
+   *                                   <------>
+   *                                updateGap = 16.74 -         0             - gap1;
+   * 
+   * 
+   *    if oldUpdateGap <= 0 (already over 16.74), then take 4ms gap0 as default delay of mine.
+   * 
+   */
+  
+  const current = performance.now();
+  const gap1 = current - startTime;
+  const gap2 = current - past;
+  const realDelay = oldUpdateGap > gap0 ? 0 : gap0 - oldUpdateGap;
+  
+  let updateGap;
+  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정
+    isInitUpdate = false;
+    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
+  } else {
+    //updateGap = Display.frameInterval - gap2 + oldUpdateGap;  //Display.frameInterval - (gap0 - oldUpdateGap) - gap1;
+    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - realDelay - gap1;
+  }
+
+  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
+  //saveLog("%c [GAP2] s}____{____e}   = " + gap2.toFixed(3), "background:yellow; color:black");
+  saveLog("%c [GAP2] s}  __{    e}   = " + realDelay.toFixed(3), "background:yellow; color:black");
+  saveLog("%c [GAP3] s}__  {    e}   = " + oldUpdateGap.toFixed(3), "background:green; color:white");
+  saveLog("%c [GAP4] s}    {s   e}__ = " + updateGap.toFixed(3), "background:blue; color:white");
+
+  if(updateGap < 0) {
+    updateGap = 0;
+  }
+  oldUpdateGap = updateGap;
+  past = current;
+
+
+  setTimeout(() => update(), updateGap);
+  
+
+
+  /** 
+      setInterval
+  */
+  /*
+  const current = performance.now();
+  const gap1 = current - startTime;
+  past = current;
+  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
+  */
+  
+  
+}
+
+let printOld;
+
+function printFps() {
+  const current = performance.now();
+
+ /*
+  save the int value to setIntGap
+ */
+  const setIntGap = (current - printOld).toFixed(0);
+  const letter = fps + " " + _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps + " " + setIntGap;
+  let isSame = true;
+  if(fps !== _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps) {
+    isSame = false; 
+  } 
+  self.postMessage({msg: 'F', payload: letter, time:isSame});
+
+  saveLog("%c FPS= " + letter, "background:cyan; color:black");
+  saveLog("%c 1 sec= " + setIntGap,
+      "background:cyan; color:red");
+  _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps = 0;
+  fps = 0;
+  printOld = current;
+}
+
+let fpsInterval;
+
+function loadAndStart(payload) {
+  let rom = payload.uInt8Array;
+  gb = new _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy(
+      payload.flagSharedBuffer,
+      payload.sbSharedBuffer,
+      payload.scSharedBuffer,
+      payload.transferTriggerSharedBuffer,
+      payload.useInternalClockSharedBuffer,
+      payload.sharedBuffer,
+      payload.timingBuffer,
+      payload.waitScBuffer,
+      payload.keySharedBuffer,
+      payload.scDirtySharedBuffer,
+      payload.scMonitorStartSharedBuffer,
+      payload.soundLeftSab,
+      payload.soundRightSab,
+      payload.fillSab,
+      payload.bufferLen,
+      payload.waitC1Buffer,
+      payload.writeBuffer,
+      payload.postBuffer
+    );
+  gb.setMessenger(self);
+  try {
+    gb.cartridge.load(rom);
+    running = true;
+    past = performance.now();
+    cycles = 0;
+    saveLog("load");
+
+    next = past;
+
+    //update();
+    //oldUpdate();
+
+    noDelayUpdate();
+
+    //setInterval(() => update(), Display.frameInterval);
+
+    //requestAnimationFrame(paint);
+
+    printOld = past;
+    fpsInterval = setInterval(() => printFps(), 1000);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+let setFirstNext = false;
+let firstNext = 0;
+
+function update() {
+  const startTime = performance.now();
+
+  if (paused || !running) {
+      return;
+  }
+  if (gb.cartridge.hasRTC) {
+      gb.cartridge.rtc.updateTime();
+  }
+  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+      try {
+          cycles += gb.cycle();
+      } catch (error) {
+          console.error(error);
+          running = false;
+          return;
+      }
+  }
+  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+  const current = performance.now();
+  
+  fps++;
+
+  if(fps > 59) {
+    isInitUpdate = true; // reset delay
+  }
+  
+  const gap1 = current-startTime;
+
+  /**
+   *   never init
+   * 
+   */
+  isInitUpdate = false;
+
+  
+  if(isInitUpdate) {
+    console.log("init");
+    isInitUpdate = false;
+
+    next = current;
+    delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
+  } else{
+    next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
+    delayGap = next - current;
+  }
+  
+
+  /*
+  if(!setFirstNext) {
+    setFirstNext = true;
+    firstNext = current;
+    next = current;
+    delayGap = Display.frameInterval - gap1;
+    isInitUpdate = false;
+    setTimeout(update, delayGap);
+    return;
+  }
+
+  if(isInitUpdate) {
+    console.log("init");
+    isInitUpdate = false;
+    next = Math.floor((current-firstNext)/Display.frameInterval)*Display.frameInterval + firstNext;
+  }
+  
+  next += Display.frameInterval; //next += 16.74 or 8.37
+  delayGap = next - current;
+  */
+  setTimeout(update, delayGap);
+}
+
+    /**
+     *                                        next=current
+     *                                         |-------|-------|
+     *    |----g--|----g--|----g--|----g--|xxxxg--|-------|-------|
+     */
+    /**
+     *  1. delayGap 이 벌어지는 걸(채무 늘어나는 것) 초기화하려고 한 로직?
+     *     아니다. speed 줄이려고 만든 로직이다. 즉, delayGap 청산 하고 새로 시작.
+     * 
+     *  2. next 위치 초기화 하는 거랑 속도 제한이랑(fps > 59 로 측정) 무슨 상관인가?
+     *     delayGap 청산 하고 새로 시작.
+     *     
+     *  3. delayGap 만 날려버리면 될텐데. next 기준점은 옮기지 않고.
+     *     하지만 now() 와 next + 16.74*n 을 가지고 어떻게 지금 위치로 next + 16.74*x 복귀시키지?
+     *     --> next -= 16.74*y
+     *   
+     *         next = firstNext + 16.74*y
+     *         y = (now()-firstNext)/16.74
+     *     
+     *  4. 질주시켜도 delayGap 상환 다 안 되나? 아, fps 59(59번)으론 상환하기 부족하구나.
+     *     
+     *  5. sound.js에서 (this.nextPush - now) 갭 차이가 점점 커졌던거는 
+     *     위의 next=current 를 반복 해주는 동안 점점 기준점이 단축되기 때문?
+     */
+
+/***/ }),
+
 /***/ "./public/js/gb/cartridge.js":
 /*!***********************************!*\
   !*** ./public/js/gb/cartridge.js ***!
@@ -507,6 +1281,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _sound_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./sound.js */ "./public/js/gb/sound.js");
 /* harmony import */ var _timer_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./timer.js */ "./public/js/gb/timer.js");
 /* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ../../dummylogger.js */ "./public/dummylogger.js");
+/* harmony import */ var _emulworker_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ../emulworker.js */ "./public/js/emulworker.js");
  // Adjust the import based on the actual exports
 
 
@@ -515,8 +1290,12 @@ __webpack_require__.r(__webpack_exports__);
 
  // Adjust based on actual exports
 
+
 class GameBoy {
-  constructor(flagSharedBuffer, sbSharedBuffer, scSharedBuffer,
+  constructor(
+      flagSharedBuffer, 
+      sbSharedBuffer, 
+      scSharedBuffer,
       transferTriggerSharedBuffer,
       useInternalClockSharedBuffer,
       sharedBuffer,
@@ -528,7 +1307,11 @@ class GameBoy {
       soundLeftSab,
       soundRightSab,
       fillSab,
-      bufferLen) {
+      bufferLen,
+      waitC1Buffer,
+      writeBuffer,
+      postBuffer
+    ) {
     this.display = new _display_js__WEBPACK_IMPORTED_MODULE_1__.Display(this);
     this.timer = new _timer_js__WEBPACK_IMPORTED_MODULE_5__.Timer(this);
     this.joypad = new _joypad_js__WEBPACK_IMPORTED_MODULE_2__.Joypad(this, keySharedBuffer);
@@ -588,6 +1371,20 @@ class GameBoy {
     this._scDirty = new Int32Array(scDirtySharedBuffer);
 
     this._scMonitor = new Int32Array(scMonitorStartSharedBuffer);
+
+    this._setAFlag = false;
+
+    this._waitForC1 = new Int32Array(waitC1Buffer);
+
+    this._logC1Flag = false;
+
+    this._isSerialHandlerWorking = false;
+
+    this.logCounter = 0;
+
+    this.writeLock = new Int32Array(writeBuffer);
+
+    this.postLock = new Int32Array(postBuffer);
   }
 
   get waitForIO() {
@@ -717,12 +1514,32 @@ class GameBoy {
   }
 
   get if() {
-    return 0xe0 | this._if[0];
+    return 0xe0 | Atomics.load(this._if, 0);//this._if[0];
   }
 
   set if(value) {
+     
     //this._if[0] = value & GameBoy.interrupts;
-    Atomics.store(this._if, 0, value & GameBoy.interrupts);
+
+    /*
+    saveEmulLog("before set if: " + Atomics.load(this._if, 0).toString(2) + " value: " + value.toString(2));
+    const after = Atomics.store(this._if, 0, value & GameBoy.interrupts);
+    saveEmulLog("after set if: " + after.toString(2) );
+    */
+
+    const before = Atomics.or(this._if, 0, value & GameBoy.interrupts);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("before set if: " + before.toString(2) + " value: " + value.toString(2));
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("after set if: " + Atomics.load(this._if, 0).toString(2));
+
+    if((value & GameBoy.serialInterrupt) == GameBoy.serialInterrupt) {
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("self serialInterrupt");
+    }
+  
+    /*
+      if(this._isSerialHandlerWorking) {
+        saveEmulLog("set if: " + after.toString(2));
+      }
+    */
   }
 
   get ie() {
@@ -741,12 +1558,18 @@ class GameBoy {
 
   requestInterrupt(interrupt) {
     //this._if[0] |= interrupt;
-    Atomics.or(this._if, 0, interrupt);
+    const before = Atomics.or(this._if, 0, interrupt);
+    /*
+    saveEmulLog("before req if: " + before.toString(2) + " target: " + interrupt.toString(2));
+    saveEmulLog("after req if: " + Atomics.load(this._if, 0).toString(2));
+    */
   }
 
   clearInterrupt(interrupt) {
     //this._if[0] &= ~interrupt;
-    Atomics.and(this._if, 0, ~interrupt);
+    const before = Atomics.and(this._if, 0, ~interrupt);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("before clear if: " + before.toString(2) + " target: " + interrupt.toString(2));
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("after clear if: " + Atomics.load(this._if, 0).toString(2));
   }
 
   callInterrupt(address) {
@@ -808,6 +1631,7 @@ class GameBoy {
                 //customLog("[get sb by cpu] ");
                 return this.serial.sb;
               case 0x02:
+                //saveEmulLog("read ff02: " + this.serial.sc);
                 //customLog("[get sc by cpu] ");
                 return this.serial.sc;
               case 0x04:
@@ -843,6 +1667,7 @@ class GameBoy {
               case 0x4b:
                 return this.display.wx;
               case 0x4d:
+                //saveEmulLog("read ff4d: " + this.key1);
                 return this.key1;
               case 0x4f:
                 return this.display.vbk;
@@ -907,8 +1732,18 @@ class GameBoy {
               case 0x01:
                 //customLog("[set sb by cpu] ");
                 this.serial.sb = value;
+
+                if(this._isSerialHandlerWorking == false) {
+                  (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("postMessage sb at self set sb");
+                  self.postMessage({msg: 'sb', payload: value, time: -1});    
+                  
+                  Atomics.store(this.postLock, 0, 1);
+                  Atomics.wait(this.postLock, 0, 1);      
+                }
+
                 break;
               case 0x02:
+                //saveEmulLog("ff02: " + value);
                 //customLog("[set sc by cpu] ");
                 this.serial.sc = value;
 
@@ -916,13 +1751,29 @@ class GameBoy {
                   Atomics.store(this._waitForSc, 0, 1);
                   (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_6__.customLog)("update sc ", value);
 
-                  self.postMessage({msg: 'sc', payload: -1, time:-1});
                   /*
-                  if(Atomics.load(this._scDirty, 0) === 1) {
-                    //Atomics.store(this._lock, 0, 1);
-                    //Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0
-                  }
-                   */
+                      move send 'sc' to the RETI.
+                      recvQ_A
+                      sendR_A, set serial interrupt_A
+                      recvQ'_B
+                      serial handler_A
+                        set sc 130, postMessage'sc'
+                          sendR'_B, set serial interrupt'_B
+                      RETI_A     
+                      //serial handler for serial interrupt'_B is not called.
+                      
+                      //so, prevent serial_interrupt'_B is wasted.
+                      //change postMessage'sc' timing from 'before RETI' to 'after RETI' 
+
+                      serial handler {
+                        set sc 128 or set sc 130
+                      } RETI
+                  */
+                  (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("postMessage sc");
+                  self.postMessage({msg: 'sc', payload: this.serial.sb, time:-1});
+
+                  Atomics.store(this.postLock, 0, 1);
+                  Atomics.wait(this.postLock, 0, 1);
                 }
 
                 break;
@@ -975,6 +1826,7 @@ class GameBoy {
                 this.display.wx = value;
                 break;
               case 0x4d:
+                //saveEmulLog("ff4d: " + value);
                 this.key1 = value;
                 break;
               case 0x4f:
@@ -1018,6 +1870,29 @@ class GameBoy {
             }
           }
         } else if (address <= 0xfffe) {
+          if(address == 0xffc1) {
+            /*
+            Atomics.store(this._waitForC1, 0 ,1);
+            saveEmulLog("write 0xffc1: " + value + " hdma: " + this.display.hdmaOn + " halt: " + this.halt +
+              " logCounter: " + (this.logCounter--)
+            );
+            this._logC1Flag = false;
+            */
+            
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("postMessage c1 at write");
+            self.postMessage({msg: 'c1', payload: this.serial.sb, time: value});
+
+            Atomics.store(this.postLock, 0, 1);
+            Atomics.wait(this.postLock, 0, 1);
+
+            Atomics.wait(this.writeLock, 0, 1);
+
+            /*
+            saveEmulLog("write 0xffc1: " + value + " hdma: " + this.display.hdmaOn + " halt: " + this.halt +
+              " logCounter: " + (this.logCounter--)
+            );
+            */
+          }
           this.hram[address & 0x7f] = value;
         } else {
           this.ie = value;
@@ -1198,11 +2073,13 @@ class GameBoy {
       this.display.hdmaCounter--;
       if (this.display.hdmaCounter == 0) {
         this.display.hdmaOn = false;
+        //saveEmulLog("hdmaOn set false at hdmaCount == 0");
         this.display.hblankHdmaOn = false;
         this.display.hdmaTrigger = false;
       }
       if (this.display.hblankHdmaOn) {
         this.display.hdmaOn = false;
+        //saveEmulLog("hdmaOn set false at hblankHdmaOn");
       }
     }
   }
@@ -1217,6 +2094,10 @@ class GameBoy {
     if ((this.ime || this.halt) && (this.ie & this.if) != 0) {
       this.halt = false;
       if (this.ime) {
+        if(this._logC1Flag) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[RETI ~ write] at interrupt: " + (this.ie & this.if).toString(2));
+        }
+
         this.ime = false;
         if ((this.ie & this.if & GameBoy.vblankInterrupt) != 0) {
           this.clearInterrupt(GameBoy.vblankInterrupt);
@@ -1228,26 +2109,48 @@ class GameBoy {
           this.clearInterrupt(GameBoy.timerInterrupt);
           this.callInterrupt(0x0050);
         } else if ((this.ie & this.if & GameBoy.serialInterrupt) != 0) {
+          if(this.logCounter != 0) {
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("something among jump,RETI,write missed or over :" + this.logCounter);
+          }
+          this.logCounter = 3;
+
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("jump to serial interrupt handler, ie: " + 
+            (this.ie).toString(2) +
+          " if: " +
+            (this.if).toString(2) +
+          " a : " + this.a +
+          " pc: " + this.pc +
+          " ffc1: " + this.readAddress(0xffc1) +
+          " logCounter: " + (this.logCounter--));
+
+          //this._setAFlag = true;
           this.clearInterrupt(GameBoy.serialInterrupt);
           this.callInterrupt(0x0058);
+          this._isSerialHandlerWorking = true;
+          
         } else if ((this.ie & this.if & GameBoy.joypadInterrupt) != 0) {
           this.clearInterrupt(GameBoy.joypadInterrupt);
           this.callInterrupt(0x0060);
         }
         cycles += 5;
+      } else {
+        console.log("cpu do nothing?!");
       }
     } else {
+      if(this._logC1Flag) {
+        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[RETI ~ write] at not intr: halt: " + this.halt + ", hdmaOn: " + this.display.hdmaOn);
+      }
       cycles += (this.halt || this.display.hdmaOn) ? 1 : this.decode();
     }
 
-    let hardwareCycles = cycles;
+    let hardwareCycles = cycles; // cycles / (this.doubleSpeed ? 2 : 1);  왜 안 해주는지?  아래에서 display,sound 를 /2 만큼 느리게 돌려서 timer, serial을 상대적으로 빠르게 함.
     while (hardwareCycles > 0) {
       this.timer.cycle();
       this.serial.cycle();
       hardwareCycles--;
     }
 
-    this.cycles += cycles / (this.doubleSpeed ? 2 : 1);
+    this.cycles += cycles / (this.doubleSpeed ? 2 : 1); // /2 되면 절반만 도네?
     while (this.cycles > 0) {
       if (this.display.hdmaOn) {
         this.runHdma();
@@ -1260,6 +2163,7 @@ class GameBoy {
     if (this.display.hdmaTrigger) {
       this.display.hdmaTrigger = false;
       this.display.hdmaOn = true;
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("hdmaOn true at hdmaTrigger");
     }
 
     return cycles / (this.doubleSpeed ? 2 : 1);
@@ -1267,8 +2171,21 @@ class GameBoy {
 
   decode() {
     const instr = this.readAddress(this.pc++);
+    if(this._setAFlag) {
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("during set A instr: " + (instr.toString(2)));
+    }
+
     let cycles = GameBoy.instrCycles[instr];
     const quad = instr >> 6, op1 = (instr & 0x3f) >> 3, op2 = instr & 0x7;
+    if(this._logC1Flag) {
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[RETI ~ write] at decode: " +  (instr.toString(2)) + 
+      " quad: " +
+    quad + 
+    " op1: " +
+    op1 +
+    " op2: " +
+    op2);
+    }
     if (quad === 0) {
       if (op2 == 6) {
         // LD r, n
@@ -1501,9 +2418,28 @@ class GameBoy {
         // LD A, (n)
         const imm = this.readAddress(this.pc++);
         this.a = this.readAddress(0xff00 | imm);
+        if( this._setAFlag) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set a: " + this.a + " from addr: 0x" + (0xff00 | imm).toString(16));
+        }
       } else if (op1 == 4 && op2 == 0) {
         // LD (n), A
         const imm = this.readAddress(this.pc++);
+
+        const targetAddr = (0xff00 | imm);
+        if(this._setAFlag) {
+          if(targetAddr == 0xff01) {
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set sb with a: " + this.a);
+          } else if(targetAddr == 0xff02) {
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set sc with a: " + this.a);
+          } else {
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set 0x" + targetAddr.toString(16) + " with a: " + this.a);
+          }
+        }
+
+        if(targetAddr == 0xffc1) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set 0xffc1: " + this.a + " setAflag: " + this._setAFlag);
+        }
+        
         this.writeAddress(0xff00 | imm, this.a);
       } else if (op1 == 7 && op2 == 2) {
         // LD A, (nn)
@@ -1654,23 +2590,57 @@ class GameBoy {
         // RET
         this.pc = this.readAddress(this.sp++);
         this.pc |= this.readAddress(this.sp++) << 8;
+        if(this._setAFlag) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("RET ");
+          this._setAFlag = false;
+        }
       } else if (op1 == 3 && op2 == 1) {
         // RETI
         this.pc = this.readAddress(this.sp++);
         this.pc |= this.readAddress(this.sp++) << 8;
         this.ime = true;
+       
+        if(this._isSerialHandlerWorking) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("RETI pc: " + this.pc +  " logCounter: " + (this.logCounter--));
+          self.postMessage({msg: 'reti', payload: -1, time: -1});    
+          
+          Atomics.store(this.postLock, 0, 1);
+          Atomics.wait(this.postLock, 0, 1);   
+
+          Atomics.wait(this.writeLock, 0, 1);
+        
+          this._isSerialHandlerWorking = false;
+        }
+
+
+        if(this._setAFlag) {
+          this._setAFlag = false;
+        }
+        /*
+        if(Atomics.load(this._waitForC1, 0) === 0) {
+          this._logC1Flag = true;
+        }
+        */  
       } else if ((op1 & 0x4) == 0 && op2 == 0) {
         // RET cc
         if (this.readCondition(op1 & 0x3)) {
           this.pc = this.readAddress(this.sp++);
           this.pc |= this.readAddress(this.sp++) << 8;
           cycles += 3;
+          if(this._setAFlag) {
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("RET CC ");
+            this._setAFlag = false;
+          }
         }
       } else if (op2 == 7) {
         // RST t
         this.writeAddress(--this.sp, this.pch);
         this.writeAddress(--this.sp, this.pcl);
         this.pc = op1 << 3;
+        if(this._setAFlag) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("RST t");
+          this._setAFlag = false;
+        }
       } else if (op1 == 6 && op2 == 3) {
         // DI
         this.ime = false;
@@ -1815,12 +2785,12 @@ GameBoy.cbInstrCycles = [
   2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
   2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
 ];
-GameBoy.joypadInterrupt = 0x10;
-GameBoy.serialInterrupt = 0x8;
-GameBoy.timerInterrupt = 0x4;
-GameBoy.statInterrupt = 0x2;
-GameBoy.vblankInterrupt = 0x1;
-GameBoy.interrupts = 0x1f;
+GameBoy.joypadInterrupt = 0x10;   // 0001 0000
+GameBoy.serialInterrupt = 0x8;    // 0000 1000
+GameBoy.timerInterrupt = 0x4;     // 0000 0100
+GameBoy.statInterrupt = 0x2;      // 0000 0010
+GameBoy.vblankInterrupt = 0x1;    // 0000 0001
+GameBoy.interrupts = 0x1f;        // 0001 1111
 
 GameBoy.startTime = 0;
 
@@ -1838,8 +2808,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./cpu.js */ "./public/js/gb/cpu.js");
 /* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../../dummylogger.js */ "./public/dummylogger.js");
+/* harmony import */ var _emulworker_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ../emulworker.js */ "./public/js/emulworker.js");
 
  // Adjust based on actual exports
+
 
 class Display {
     constructor(gb) {
@@ -2022,9 +2994,11 @@ class Display {
             return;
         }
         this.hdmaOn = (value & 0x80) == 0;
+        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_2__.saveEmulLog)("hdmaOn set " + this.hdmaOn);
         this.hblankHdmaOn = (value & 0x80) != 0;
         if (this.hblankHdmaOn && this.mode == Display.modes.hblank) {
             this.hdmaOn = true;
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_2__.saveEmulLog)("hdmaOn set true at hblank");
         }
         this._hdma5 = value;
         this.hdmaCounter = (value & 0x7f) + 1;
@@ -2519,7 +3493,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   Serial: () => (/* binding */ Serial)
 /* harmony export */ });
 /* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../../dummylogger.js */ "./public/dummylogger.js");
+/* harmony import */ var _emulworker_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../emulworker.js */ "./public/js/emulworker.js");
  // Adjust based on actual exports
+
 
 class Serial {
   constructor(gb, sbSharedBuffer, scSharedBuffer, transferTriggerSharedBuffer,
@@ -2567,19 +3543,19 @@ class Serial {
 
   get sb() {
     const value = Atomics.load(this._sb, 0);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("<< get sb ", value);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)("<< get sb ", value);
     return value;
   }
 
   set sb(value) {
     Atomics.store(this._sb, 0, value);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(">> set sb ", value);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)(">> set sb ", value);
   }
 
   get sc() {
     //return 0x7e | (this.transferRunning << 7) | this.useInternalClock[0];
     const value = Atomics.load(this._sc, 0);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("<< get sc ", value);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)("<< get sc ", value);
     return (0x7e | value);
   }
 
@@ -2589,11 +3565,22 @@ class Serial {
                 129  0x 1000 0001
      */
     Atomics.store(this._sc, 0, value);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(">> set sc ", value);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)(">> set sc ", value);
 
     if ((value | 0x7E) === 0xFF) {
       this.transferInProgress = true;
       this.divider = 0;
+    }
+
+    const clockSpeed = (value & 0b10);
+    if ( clockSpeed === 0b10) {
+      Serial.transferTime = Serial.cpuCyclesPerFastCycle * 8;
+      //console.log("fast: " + Serial.transferTime);
+    } else if ( clockSpeed === 0b0 ){
+      Serial.transferTime = Serial.cpuCyclesPerCycle * 8;
+      //console.log("normal: " + Serial.transferTime);
+    } else {
+      console.log("sc clockSpeed bit exception " + value);
     }
   }
 
@@ -2608,13 +3595,13 @@ class Serial {
           payload: this._sb[0],
           time: -1 //Atomics.load(this.gb.timing, 0)
         });
-        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("%c 104 serial cycle:" + this.serialCycle, "background:brown; color:white");
+        //customLog("%c 104 serial cycle:" + this.serialCycle, "background:brown; color:white");
         this.serialCycle = 0;
         //customLog("++ serial blocked ", Atomics.load(this.gb.timing, 0));
         Atomics.store(this._lock, 0, 1);
-        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("++ serial blocked ");
+        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)("++ serial store ");
         Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0
-        //customLog(">> worker blocked");
+        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)("-- serial released");
       }
     }
   }
@@ -2626,7 +3613,7 @@ Serial.transferTime = Serial.cpuCyclesPerCycle * 8;
 //Serial.cpuCyclesPerCycle = (GameBoy.frequency * 4) / Serial.frequency;
 
 Serial.fastFrequency = 262144;
-Serial.cpuCyclesPerFastCycle = (4194304 / 4) / Serial.frequency;//GameBoy.frequency / Serial.frequency;
+Serial.cpuCyclesPerFastCycle = (4194304 / 4) / Serial.fastFrequency;//GameBoy.frequency / Serial.frequency;
 //Serial.cpuCyclesPerFastCycle = GameBoy.frequency / Serial.fastFrequency;
 
 
@@ -3267,54 +4254,8 @@ class Sound {
   
         if(((this.cycles / Sound.cyclesPerSample) % Sound.bufferSamples) == (Sound.bufferSamples - 1)) {
             const old = Atomics.add(this.filled, 0, Sound.bufferSamples);
-            console.log("fill: " + (old + Sound.bufferSamples));
+            //console.log("fill: " + (old + Sound.bufferSamples));
         }
-    }
-
-    pushBuffer() {
-        const now = (performance.now()/1000);
-        const nowPlusDelay = now + Sound.bufferDuration;//Sound.latency;
-        this.nextPush = this.nextPush || nowPlusDelay;
-        //console.log("after: " + this.nextPush.toFixed(3));
-        if (now <= this.nextPush) {
-            const old = Atomics.add(this.filled, 0, Sound.bufferSamples);
-            console.log((now - this.pastTime).toFixed(3) + " " + (this.nextPush - now).toFixed(3) + " fill: " + (old + 4096));
- 
-            /*
-                bufferSource.start(this.nextPush);
-            */
-            this.nextPush += Sound.bufferDuration;
-
-            //this.nextPush = now + Sound.bufferDuration;
-            //console.log("before: " + this.nextPush.toFixed(3));
-        } else {
-            console.log("skip");
-            this.nextPush = nowPlusDelay;
-        }
-        this.pastTime = now;
-        /*
-        const now = Sound.ctx.currentTime;
-        const nowPlusDelay = now + Sound.latency;
-        this.nextPush = this.nextPush || nowPlusDelay;
-        if (this.nextPush >= now) {
-            const bufferSource = Sound.ctx.createBufferSource();
-            bufferSource.buffer = this.buffer;
-            bufferSource.connect(this.gainNode);
-            bufferSource.start(this.nextPush);
-            this.nextPush += Sound.bufferDuration;
-
-            this.buffer = Sound.ctx.createBuffer(2, Sound.bufferSamples, Sound.sampleFrequency);
-            this.bufferLeft = this.buffer.getChannelData(0);
-            this.bufferRight = this.buffer.getChannelData(1);
-        } else {
-            this.nextPush = nowPlusDelay;
-        }
-        */
-        this._messenger.postMessage({
-            msg: 'S',
-            payload: -1,
-            time: -1
-        });
     }
 
     cycle() {
@@ -3499,7 +4440,7 @@ const unlocked = 0;
    INT_SIZE should be 2 to the power of n
    to use bitwise operation as modular operation.
 */
-const INT_SIZE = 16;
+const INT_SIZE = 32;
 const BIT_MOD = INT_SIZE - 1; 
 
 class OrderLock {
@@ -4147,752 +5088,11 @@ class Mutex {
 /******/ 	})();
 /******/ 	
 /************************************************************************/
-var __webpack_exports__ = {};
-// This entry needs to be wrapped in an IIFE because it needs to be isolated against other modules in the chunk.
-(() => {
-/*!*********************************!*\
-  !*** ./public/js/emulworker.js ***!
-  \*********************************/
-__webpack_require__.r(__webpack_exports__);
-/* harmony import */ var _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./gb/cpu.js */ "./public/js/gb/cpu.js");
-/* harmony import */ var _gb_display_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./gb/display.js */ "./public/js/gb/display.js");
-/* harmony import */ var _sync_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./sync.js */ "./public/js/sync.js");
-/* harmony import */ var _orderlock_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./orderlock.js */ "./public/js/orderlock.js");
-/*
-importScripts('gb/cartridge.js',
-    'gb/cpu.js',
-    'gb/display.js',
-    'gb/joypad.js',
-    'gb/rtc.js',
-    'gb/serial.js',
-    'gb/sound.js',
-    'gb/timer.js',
-    'sync.js',
-    'orderlock.js',
-  '../dummylogger.js');
-*/
-
-
- // Adjust based on actual exports
- // Adjust based on actual exports
-
-
-//const { Mutex } = self; 
-//const { OrderLock } = self;
-
-let delayGap = 0;
-let timestampLock = 0;
-let mu;
-let orderLock;
-const maxSize = 1024 * 1024 * 1000;
-
-let sharedArray;
-let sharedBuffer;
-//let currentDataSize = 0; // Track the current size of data written
-
-// Initialize TextEncoder and TextDecoder once
-const txtEncoder = new TextEncoder();
-const txtDecoder = new TextDecoder();
-
-let sharedCurrentSizeBuffer;
-let sharedCurrentSize;
-
-function saveLog(...args) {
-  //saveLogImpl(...args);
-  //console.log(args.join(' '));
-}
-
-function saveLogImpl(...args) {
-  const enterId = orderLock.lock();
-  //console.log("emul [GET LOCK]");
-  const line = "[" + enterId + "] " + args.join(' ');
-  
-  let currentSize = Atomics.load(sharedCurrentSize, 0);
-  const encodedLine = txtEncoder.encode(line + '\n'); // Add newline for separation
-  const lineSize = encodedLine.length;
-
-  // Check if there is enough space in the buffer
-  if (currentSize + lineSize > maxSize) {
-      console.log('Buffer is full. Cannot add more data.');
-      orderLock.unLock();
-      return false; // Indicate that the buffer is full
-  }
-
-  // Store the encoded line in the buffer atomically
-  for (let i = 0; i < lineSize; i++) {
-      Atomics.store(sharedArray, currentSize + i, encodedLine[i]);
-  }
-
-  // Update the current size atomically
-  Atomics.add(new Int32Array(sharedBuffer), 0, lineSize); // Assuming the first 4 bytes of the buffer are used for currentSize
-  //currentSize += lineSize; // Update the current size
-  Atomics.add(sharedCurrentSize, 0, lineSize);
-
-  orderLock.unLock();
-  //console.log("emul [RELEASE LOCK]");
-  return true; // Indicate success
-}
-
-self.onmessage = event => {
-  const {msg, payload} = event.data;
-  switch (msg) {
-    case 'init':
-      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas = payload.canvas;
-      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
-      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
-      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.getContext('2d');
-      timestampLock = new Int32Array(payload.networkTimingBuffer);
-  
-      mu = _sync_js__WEBPACK_IMPORTED_MODULE_2__.Mutex.connect(payload.smu);
-
-      sharedBuffer = payload.buffer;
-      sharedArray = new Uint8Array(sharedBuffer);
-
-      sharedCurrentSizeBuffer = payload.currentSizeBuffer;
-      sharedCurrentSize = new Int32Array(sharedCurrentSizeBuffer);
-
-      orderLock = _orderlock_js__WEBPACK_IMPORTED_MODULE_3__.OrderLock.connect(payload.orderLock);
-
-      loadAndStart(payload);
-      break;
-    case 'restart':
-      const current = performance.now();
-      const travelTime = current-past;
-      const leftDelayTime = delayGap - travelTime;
-
-      saveLog("delayGap     : ", delayGap.toFixed(3));
-      saveLog("travelTime   : ", travelTime.toFixed(3));
-      saveLog("leftDelayTime: ", leftDelayTime.toFixed(3));
-
-      /*
-      if(payload.isNextRecvQ) {
-        saveLog("****0       : nextRecvQ is true");
-        preStart();
-        saveLog("****0       break");
-        return;
-      }
-      */
-
-      
-      if(delayGap <= 0) { // repay armotized delay by skipping the wait time
-        //console.log("**** 1      : Gap1 is exceed 16.74");
-        preStart();
-        saveLog("**** 1      break");
-        return;
-      }      
-      
-      if(leftDelayTime <= 0) { // repay armotized delay by skipping the wait time
-        //console.log("****  2     : travel Time used all delayGap");
-        preStart();
-        saveLog("****  2     break");
-        return;
-      }
-
-      
-      if(leftDelayTime > 4) {
-        //console.log("****   3    : more than 4ms call SetTimeout ");
-        setTimeout(() =>  preStart(), leftDelayTime);
-        saveLog("****   3    break");
-        return;
-      } 
-
-      
-      //console.log("****    4   : left delay is less than and equal four. " + leftDelayTime.toFixed(3));
-      preStart();
-      saveLog("****    4   break");
-      
-
-     //setTimeout(() =>  preStart(), leftDelayTime);
-     //setTimeout(() =>  preStart(), delayGap);
-      return;
-    case 'start':
-      noDelayUpdate();
-      return;
-    default:
-      //saveLog(event);
-      console.log(event);
-  }
-};
-
-let gb;
-let cycles;
-let next;
-let paused = false;
-let running = false;
-
-let past;
-
-let oldUpdateGap = 0;
-let fps = 0;
-let isInitUpdate = true;
-
-let pastGap = 0;
-
-let timestamp = 0;
-let mainLock;
-let tsIdx = 0;
-
-function preStart() {
-  self.postMessage({
-    msg: 'T',
-    payload: -1,
-    time: -1
-  });
-}
-
-let cpuCycles = 0;
-const PERIOD = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame/3;
-
-function noDelayUpdate() {
-  const startTime = performance.now();
-  _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime = startTime;
-  const gap0 = startTime - past;
-  //saveLog("start time: ", startTime.toFixed(3));
-  
-  //console.log("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white")
-
- if (paused || !running) {
-        return;
-    }
-    if (gb.cartridge.hasRTC) {
-        gb.cartridge.rtc.updateTime();
-    }
-    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-        try {
-            cpuCycles = gb.cycle();
-            cycles += cpuCycles;
-            
-            /*
-              [TODO]
-              if the user try to start 1p,
-              this logic should be skipped
-            */
-
-            
-            timestamp += cpuCycles;
-            if(timestamp >= PERIOD) {
-              timestamp = timestamp - PERIOD;
-
-              tsIdx = (tsIdx + 1) % 10;
-
-              
-              mu.lock();
-
-              self.postMessage({
-                msg: 'ts',
-                payload: tsIdx,
-                time: -1
-              });
-              saveLog("ts request " + tsIdx);
-              Atomics.store(timestampLock, 0, 1);
-              saveLog("ts blocked " + tsIdx);
-              Atomics.wait(timestampLock, 0, 1);
-              saveLog("ts unblocked " + tsIdx);
-              
-            }
-            
-            
-            
-            
-        } catch (error) {
-            console.error(error);
-            running = false;
-            return;
-        }
-    }
-    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-    saveLog("over cycles: ", cycles);
-
-    fps++;
-
-
-    const current = performance.now();
-    past = current;
-    const gap1 = current-startTime;
-    //console.log("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:green; color:white");
-
-
-    if(fps > 59) {
-      saveLog(fps + " fps over 59, reset old delay 0");
-      isInitUpdate = true; // reset delay
-    }
-    
-    /*
-    if(isInitUpdate) {
-      console.log("init");
-      isInitUpdate = false;
-      next = current;
-      delayGap = Display.frameInterval - gap1;
-    } else {
-
-      // amortized
-      next += Display.frameInterval; //next += 16.74 or 8.37
-      delayGap = next - current;
-    
-                            // not amortized
-                            /*
-                            if((delayGap > 0) && (gap0 > delayGap)) {
-                              delayGap = Display.frameInterval - (gap0 - delayGap) - gap1;
-                            } else {
-                              delayGap = Display.frameInterval - gap1;
-                            }
-                            */
-    //}
-    
-
-    if(!setFirstNext) {
-      setFirstNext = true;
-      firstNext = current;
-      next = current;
-      delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
-      isInitUpdate = false;
-      setTimeout(update, delayGap);
-      return;
-    }
-  
-    if(isInitUpdate) {
-      console.log("init");
-      isInitUpdate = false;
-      next = Math.floor((current-firstNext)/_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval)*_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval + firstNext;
-    }
-     
-    next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
-    delayGap = next - current;
-
-
-    self.postMessage({ // recvQ
-      msg: 'M',
-      payload: -1,
-      time: -1
-    });
-}
-
-
-function oldUpdate() {
-  const startTime = performance.now();
-    const gap0 = startTime - past;
-    saveLog("%c [GAPx]    e}_ {s     e}   = " + pastGap.toFixed(3), "background:blue; color:white");
-    saveLog("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white");
-    if(pastGap > 0) {
-        saveLog("%c [GAPr]    e} _{s     e}   = " + (gap0-pastGap).toFixed(3), "background:green; color:white");
-    } else {
-        saveLog("%c [GAPr]    e} _{s     e}   = " + (gap0).toFixed(3), "background:green; color:white");
-    }
-
-    if (paused || !running) {
-        return;
-    }
-    if (gb.cartridge.hasRTC) {
-        gb.cartridge.rtc.updateTime();
-    }
-    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-        try {
-            cycles += gb.cycle();
-        } catch (error) {
-            console.error(error);
-            running = false;
-            return;
-        }
-    }
-    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-
-    fps++;
-
-    const current = performance.now();
-    const gap1 = current-startTime;
-    let nextGap;
-
-    
-    if(isInitUpdate) {
-      isInitUpdate = false;
-      next = current;
-      nextGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval-gap1;
-    } else {
-      next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
-      nextGap = next - current;
-    }
-    
-
-    // origin
-    //next += Display.frameInterval; //next += 16.74 or 8.37
-    //nextGap = next - current;
-    //
-
-
-    saveLog("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:orange; color:black");
-    saveLog("%c [GAP4]        {s     e}___= " + nextGap.toFixed(3), "color:blue");
-
-    past = current;
-
-    pastGap = nextGap;
-    
-    setTimeout(oldUpdate, nextGap);
-}
-
-let lastTime;
-function paint(callTime) {
-  saveLog("%c [GAP$] {s__}___{e  }   = " + (callTime - lastTime).toFixed(3), "background:green; color:white");
-  lastTime = callTime;
-
-  /*
-  const startTime = performance.now();
-  const gap0 = startTime - past;
-  saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
-  */
-  
-
-  if (paused || !running) {
-    return;
-  }
-  if (gb.cartridge.hasRTC) {
-    saveLog("%c RTC " , "background:black; color:white");
-    gb.cartridge.rtc.updateTime();
-  }
-
-  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-    try {
-      cycles += gb.cycle();
-    } catch (error) {
-      console.error(error);
-      running = false;
-      return;
-    }
-  }
-  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-
-  fps++;
-
-  /*
-  const current = performance.now();
-  const gap1 = current - startTime;
-  past = current;
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  */
-  
-
-  requestAnimationFrame(paint);
-}
-
-
-function updateOG() {
-  const startTime = performance.now();
-  const gap0 = startTime - past;
-  saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
-
-  if (paused || !running) {
-    return;
-  }
-  if (gb.cartridge.hasRTC) {
-    gb.cartridge.rtc.updateTime();
-  }
-
-  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-    try {
-      cycles += gb.cycle();
-    } catch (error) {
-      console.error(error);
-      running = false;
-      return;
-    }
-  }
-  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-
-  fps++;
-
-
-
-
-
-
-  /**
-         'loadAndStart'   'setTimeout'
-      next  : now,         now+16.74,         // ideal lap time
-      before: now,   now+x            now+y,
-
-
-     =========|=========|
-      (     )   (    )
-            <--       <--
-
-      updateGap = next - current
-     
-   */
-  /*
-  const current = performance.now();
-  const gap1 = current-startTime;
-  let updateGap;
-  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정
-    isInitUpdate = false;
-    next = current;
-    updateGap = Display.frameInterval-gap1;
-  } else {
-    next += Display.frameInterval; // +16.74ms
-    updateGap = next - current;
-  }
-  past = current;
-
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  saveLog("%c [GAPu] s}    {    e}<--= " + updateGap.toFixed(3), "background:green; color:white");
-  
-  setTimeout(() => update(), updateGap);
-*/
-
-
-
-  /*
-   const current = performance.now();
-   const setTimeoutGap = current-past;
-   past = current;
-   const updateGap = Display.frameInterval - setTimeoutGap;
-
-   saveLog("%c [GAP1]        {s-----e}   = " + (current-startTime).toFixed(3), "background:orange; color:black");
-   saveLog("%c [GAP2] {  s}--{------e}   = "+ setTimeoutGap.toFixed(3), "background:yellow; color:black");
-   saveLog("%c [GAP3} {  s--16.74---e}   = "+ updateGap.toFixed(3), "background:green; color:white");
-   */
-
-
-
-/**
- *   (       )                (      )
- * 
- *           _________.........______xxxxx
- * 
- *           <------->                       oldUpdateGap     
- *           <----------------->             gap0
- *                             <----->       gap1
- *           <----------------------->       gap2
- *                                   <--->   updateGap
- *                    <------->              realDelay
- */
-
-  /**
-   * 
-   *                          if oldUpdateGap <= gap0
-   *                               (    )    (     )
-   *                                   <-->....
-   *                                   <------>
-   *                                updateGap = 16.74 - (gap0 - oldUpdateGap) - gap1;
-   *                          else
-   *                               (    )    (     )
-   *                                   <-------->
-   *                                   <------>
-   *                                updateGap = 16.74 -         0             - gap1;
-   * 
-   * 
-   *    if oldUpdateGap <= 0 (already over 16.74), then take 4ms gap0 as default delay of mine.
-   * 
-   */
-  
-  const current = performance.now();
-  const gap1 = current - startTime;
-  const gap2 = current - past;
-  const realDelay = oldUpdateGap > gap0 ? 0 : gap0 - oldUpdateGap;
-  
-  let updateGap;
-  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정
-    isInitUpdate = false;
-    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
-  } else {
-    //updateGap = Display.frameInterval - gap2 + oldUpdateGap;  //Display.frameInterval - (gap0 - oldUpdateGap) - gap1;
-    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - realDelay - gap1;
-  }
-
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  //saveLog("%c [GAP2] s}____{____e}   = " + gap2.toFixed(3), "background:yellow; color:black");
-  saveLog("%c [GAP2] s}  __{    e}   = " + realDelay.toFixed(3), "background:yellow; color:black");
-  saveLog("%c [GAP3] s}__  {    e}   = " + oldUpdateGap.toFixed(3), "background:green; color:white");
-  saveLog("%c [GAP4] s}    {s   e}__ = " + updateGap.toFixed(3), "background:blue; color:white");
-
-  if(updateGap < 0) {
-    updateGap = 0;
-  }
-  oldUpdateGap = updateGap;
-  past = current;
-
-
-  setTimeout(() => update(), updateGap);
-  
-
-
-  /** 
-      setInterval
-  */
-  /*
-  const current = performance.now();
-  const gap1 = current - startTime;
-  past = current;
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  */
-  
-  
-}
-
-let printOld;
-
-function printFps() {
-  const current = performance.now();
-
- /*
-  save the int value to setIntGap
- */
-  const setIntGap = (current - printOld).toFixed(0);
-  const letter = fps + " " + _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps + " " + setIntGap;
-  let isSame = true;
-  if(fps !== _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps) {
-    isSame = false; 
-  } 
-  self.postMessage({msg: 'F', payload: letter, time:isSame});
-
-  saveLog("%c FPS= " + letter, "background:cyan; color:black");
-  saveLog("%c 1 sec= " + setIntGap,
-      "background:cyan; color:red");
-  _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps = 0;
-  fps = 0;
-  printOld = current;
-}
-
-function loadAndStart(payload) {
-  let rom = payload.uInt8Array;
-  gb = new _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy(payload.flagSharedBuffer,
-      payload.sbSharedBuffer,
-      payload.scSharedBuffer,
-      payload.transferTriggerSharedBuffer,
-      payload.useInternalClockSharedBuffer,
-      payload.sharedBuffer,
-      payload.timingBuffer,
-      payload.waitScBuffer,
-      payload.keySharedBuffer,
-      payload.scDirtySharedBuffer,
-      payload.scMonitorStartSharedBuffer,
-      payload.soundLeftSab,
-      payload.soundRightSab,
-      payload.fillSab,
-      payload.bufferLen);
-  gb.setMessenger(self);
-  try {
-    gb.cartridge.load(rom);
-    running = true;
-    past = performance.now();
-    cycles = 0;
-    saveLog("load");
-
-    next = past;
-
-    //update();
-    //oldUpdate();
-
-    noDelayUpdate();
-
-    //setInterval(() => update(), Display.frameInterval);
-
-    //requestAnimationFrame(paint);
-
-    printOld = past;
-    setInterval(() => printFps(), 1000);
-  } catch (error) {
-    console.error(error);
-  }
-}
-
-let setFirstNext = false;
-let firstNext = 0;
-
-function update() {
-  const startTime = performance.now();
-
-  if (paused || !running) {
-      return;
-  }
-  if (gb.cartridge.hasRTC) {
-      gb.cartridge.rtc.updateTime();
-  }
-  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-      try {
-          cycles += gb.cycle();
-      } catch (error) {
-          console.error(error);
-          running = false;
-          return;
-      }
-  }
-  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-  const current = performance.now();
-  
-  fps++;
-
-  if(fps > 59) {
-    isInitUpdate = true; // reset delay
-  }
-  
-  const gap1 = current-startTime;
-
-  /**
-   *   never init
-   * 
-   */
-  isInitUpdate = false;
-
-  
-  if(isInitUpdate) {
-    console.log("init");
-    isInitUpdate = false;
-
-    next = current;
-    delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
-  } else{
-    next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
-    delayGap = next - current;
-  }
-  
-
-  /*
-  if(!setFirstNext) {
-    setFirstNext = true;
-    firstNext = current;
-    next = current;
-    delayGap = Display.frameInterval - gap1;
-    isInitUpdate = false;
-    setTimeout(update, delayGap);
-    return;
-  }
-
-  if(isInitUpdate) {
-    console.log("init");
-    isInitUpdate = false;
-    next = Math.floor((current-firstNext)/Display.frameInterval)*Display.frameInterval + firstNext;
-  }
-  
-  next += Display.frameInterval; //next += 16.74 or 8.37
-  delayGap = next - current;
-  */
-  setTimeout(update, delayGap);
-}
-
-    /**
-     *                                        next=current
-     *                                         |-------|-------|
-     *    |----g--|----g--|----g--|----g--|xxxxg--|-------|-------|
-     */
-    /**
-     *  1. delayGap 이 벌어지는 걸(채무 늘어나는 것) 초기화하려고 한 로직?
-     *     아니다. speed 줄이려고 만든 로직이다. 즉, delayGap 청산 하고 새로 시작.
-     * 
-     *  2. next 위치 초기화 하는 거랑 속도 제한이랑(fps > 59 로 측정) 무슨 상관인가?
-     *     delayGap 청산 하고 새로 시작.
-     *     
-     *  3. delayGap 만 날려버리면 될텐데. next 기준점은 옮기지 않고.
-     *     하지만 now() 와 next + 16.74*n 을 가지고 어떻게 지금 위치로 next + 16.74*x 복귀시키지?
-     *     --> next -= 16.74*y
-     *   
-     *         next = firstNext + 16.74*y
-     *         y = (now()-firstNext)/16.74
-     *     
-     *  4. 질주시켜도 delayGap 상환 다 안 되나? 아, fps 59(59번)으론 상환하기 부족하구나.
-     *     
-     *  5. sound.js에서 (this.nextPush - now) 갭 차이가 점점 커졌던거는 
-     *     위의 next=current 를 반복 해주는 동안 점점 기준점이 단축되기 때문?
-     */
-})();
-
+/******/ 	
+/******/ 	// startup
+/******/ 	// Load entry module and return exports
+/******/ 	// This entry module is referenced by other modules so it can't be inlined
+/******/ 	var __webpack_exports__ = __webpack_require__("./public/js/emulworker.js");
+/******/ 	
 /******/ })()
 ;
