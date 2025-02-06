@@ -251,14 +251,38 @@ function noDelayUpdate() {
   saveEmulLog("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
 
 
- if (paused || !running) {
+    if (paused || !running) {
         return;
     }
     if (gb.cartridge.hasRTC) {
         gb.cartridge.rtc.updateTime();
     }
+
+    let needHeadSync = true;
+
     while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
         try {
+          /*
+              1 per gap
+          */
+          if(needHeadSync) {
+            needHeadSync = false;
+            tsIdx = (tsIdx + 1) % 10;
+
+            mu.lock();
+
+            self.postMessage({
+              msg: 'ts',
+              payload: tsIdx,
+              time: -1
+            });
+            saveLog("ts request " + tsIdx);
+            Atomics.store(timestampLock, 0, 1);
+            saveLog("ts blocked " + tsIdx);
+            Atomics.wait(timestampLock, 0, 1);
+            saveLog("ts unblocked " + tsIdx);
+          }
+
             cpuCycles = gb.cycle();
             cycles += cpuCycles;
             
@@ -266,7 +290,6 @@ function noDelayUpdate() {
               [TODO]
               if the user try to start 1p,
               this logic should be skipped
-            */
 
             
             timestamp += cpuCycles;
@@ -290,8 +313,7 @@ function noDelayUpdate() {
               saveLog("ts unblocked " + tsIdx);
               
             }
-            
-            
+            */
             
         } catch (error) {
             console.error(error);
@@ -4064,7 +4086,7 @@ class Sound {
 
     cycle() {
         this.cycles += Sound.cyclesPerCPUCycle;
-        //this.cycles = (this.cycles + Sound.cyclesPerCPUCycle) % this.bufferLen; // 4096(bufferSamples) * 8 == 32768
+        //this.cycles = (this.cycles + Sound.cyclesPerCPUCycle) % this.bufferLen; // 4096(bufferSamples) * 8 == 32768  소리 안 남..
 
         if (this.soundEnable) {
             if (this.cycles % Sound.cyclesPerSample == 0) {
