@@ -23,7 +23,14 @@
     <!-- script defer src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js"></script -->
 
+  <!-- link href="gameboy.css" rel="stylesheet" -->
   <meta name="viewport" content="width=device-width">
+
+  <style>
+
+
+
+  </style>
 <script defer src="coi.js"></script><script defer src="emul.js"></script><script defer src="soundprocessor.js"></script><script defer src="rtc.js"></script><script defer src="log.js"></script><link href="rtc.css" rel="stylesheet"></head>
 
 <body class="bg-light text-dark">
@@ -46,10 +53,10 @@
         </button>
         <buttion id="copyBtn">
           copy room id
-        </buttion> 
+        </buttion>
         <button id="pingCheckerBtn"></button>
           ping check
-        </button>  
+        </button>
     </div>
     <div>
         <span id="currentRoom"></span>
@@ -89,17 +96,6 @@
     </div>
     
 
-
-
-
-
-
-
-
-
-
-
-
 <div class="container-fluid my-3">
   <div class="row">
     <canvas id="waveform" width="1900" height="800"></canvas>
@@ -135,7 +131,7 @@
                   <div class="startbutton childDiv" data-child-number="1">start</div>
                 </div>
                 </div>
-
+                
               <div class="container my-3 px-0">
                 <label for="startDemoButton" class="btn btn-dark w-100">Start Demo</label>
               </div>
@@ -145,6 +141,7 @@
               <input type="button" id="startDemoButton" class="d-none"/>
               <input type="file" id="romFileInput" accept=".gb, .gbc" class="d-none"/>
             </div>
+
             <div class="col-md">
               <div class="accordion my-3 bg-white" id="controlAccordion">
                 <div class="accordion-item">

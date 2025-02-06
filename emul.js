@@ -239,7 +239,7 @@ function preStart() {
 }
 
 let cpuCycles = 0;
-const PERIOD = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame/3;
+const PERIOD = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame/4;
 
 function noDelayUpdate() {
   const startTime = performance.now();
@@ -251,14 +251,40 @@ function noDelayUpdate() {
   saveEmulLog("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
 
 
- if (paused || !running) {
+    if (paused || !running) {
         return;
     }
     if (gb.cartridge.hasRTC) {
+        console.log("rtc");
         gb.cartridge.rtc.updateTime();
     }
+    
+    let needHeadSync = true;
+
     while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
         try {
+
+          /*
+              1 per gap
+          */
+          if(needHeadSync) {
+            needHeadSync = false;
+            tsIdx = (tsIdx + 1) % 10;
+
+            mu.lock();
+
+            self.postMessage({
+              msg: 'ts',
+              payload: tsIdx,
+              time: -1
+            });
+            saveLog("ts request " + tsIdx);
+            Atomics.store(timestampLock, 0, 1);
+            saveLog("ts blocked " + tsIdx);
+            Atomics.wait(timestampLock, 0, 1);
+            saveLog("ts unblocked " + tsIdx);
+          }
+
             cpuCycles = gb.cycle();
             cycles += cpuCycles;
             
@@ -266,8 +292,6 @@ function noDelayUpdate() {
               [TODO]
               if the user try to start 1p,
               this logic should be skipped
-            */
-
             
             timestamp += cpuCycles;
             if(timestamp >= PERIOD) {
@@ -275,7 +299,6 @@ function noDelayUpdate() {
 
               tsIdx = (tsIdx + 1) % 10;
 
-              
               mu.lock();
 
               self.postMessage({
@@ -288,11 +311,8 @@ function noDelayUpdate() {
               saveLog("ts blocked " + tsIdx);
               Atomics.wait(timestampLock, 0, 1);
               saveLog("ts unblocked " + tsIdx);
-              
             }
-            
-            
-            
+            */
         } catch (error) {
             console.error(error);
             running = false;
@@ -655,7 +675,8 @@ let fpsInterval;
 
 function loadAndStart(payload) {
   let rom = payload.uInt8Array;
-  gb = new _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy(payload.flagSharedBuffer,
+  gb = new _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy(
+      payload.flagSharedBuffer,
       payload.sbSharedBuffer,
       payload.scSharedBuffer,
       payload.transferTriggerSharedBuffer,
@@ -669,7 +690,11 @@ function loadAndStart(payload) {
       payload.soundLeftSab,
       payload.soundRightSab,
       payload.fillSab,
-      payload.bufferLen);
+      payload.bufferLen,
+      payload.waitC1Buffer,
+      payload.writeBuffer,
+      payload.postBuffer
+    );
   gb.setMessenger(self);
   try {
     gb.cartridge.load(rom);
@@ -1290,7 +1315,10 @@ __webpack_require__.r(__webpack_exports__);
 
 
 class GameBoy {
-  constructor(flagSharedBuffer, sbSharedBuffer, scSharedBuffer,
+  constructor(
+      flagSharedBuffer, 
+      sbSharedBuffer, 
+      scSharedBuffer,
       transferTriggerSharedBuffer,
       useInternalClockSharedBuffer,
       sharedBuffer,
@@ -1302,7 +1330,11 @@ class GameBoy {
       soundLeftSab,
       soundRightSab,
       fillSab,
-      bufferLen) {
+      bufferLen,
+      waitC1Buffer,
+      writeBuffer,
+      postBuffer
+    ) {
     this.display = new _display_js__WEBPACK_IMPORTED_MODULE_1__.Display(this);
     this.timer = new _timer_js__WEBPACK_IMPORTED_MODULE_5__.Timer(this);
     this.joypad = new _joypad_js__WEBPACK_IMPORTED_MODULE_2__.Joypad(this, keySharedBuffer);
@@ -1362,6 +1394,28 @@ class GameBoy {
     this._scDirty = new Int32Array(scDirtySharedBuffer);
 
     this._scMonitor = new Int32Array(scMonitorStartSharedBuffer);
+
+    this._setAFlag = false;
+
+    this._waitForC1 = new Int32Array(waitC1Buffer);
+
+    this._logC1Flag = false;
+
+    this._isSerialHandlerWorking = false;
+
+    this.logCounter = 0;
+
+    this.writeLock = new Int32Array(writeBuffer);
+
+    this.postLock = new Int32Array(postBuffer);
+
+    this.oldPc = 0;
+
+    this.selfScCount = 0;
+
+    this.isSelfScAtPc18933 = false;
+
+    this.logSelfScAtPc18933 = false;
   }
 
   get waitForIO() {
@@ -1491,14 +1545,32 @@ class GameBoy {
   }
 
   get if() {
-    //return 0xe0 | this._if[0];
-    return 0xe0 | Atomics.load(this._if, 0);
+    return 0xe0 | Atomics.load(this._if, 0);//this._if[0];
   }
 
   set if(value) {
+     
     //this._if[0] = value & GameBoy.interrupts;
-    //Atomics.store(this._if, 0, value & GameBoy.interrupts);
-    Atomics.or(this._if, 0, value & GameBoy.interrupts);
+
+    /*
+    saveEmulLog("before set if: " + Atomics.load(this._if, 0).toString(2) + " value: " + value.toString(2));
+    const after = Atomics.store(this._if, 0, value & GameBoy.interrupts);
+    saveEmulLog("after set if: " + after.toString(2) );
+    */
+
+    const before = Atomics.or(this._if, 0, value & GameBoy.interrupts);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("before set if: " + before.toString(2) + " value: " + value.toString(2));
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("after set if: " + Atomics.load(this._if, 0).toString(2));
+
+    if((value & GameBoy.serialInterrupt) == GameBoy.serialInterrupt) {
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("self serialInterrupt");
+    }
+  
+    /*
+      if(this._isSerialHandlerWorking) {
+        saveEmulLog("set if: " + after.toString(2));
+      }
+    */
   }
 
   get ie() {
@@ -1517,12 +1589,18 @@ class GameBoy {
 
   requestInterrupt(interrupt) {
     //this._if[0] |= interrupt;
-    Atomics.or(this._if, 0, interrupt);
+    const before = Atomics.or(this._if, 0, interrupt);
+    /*
+    saveEmulLog("before req if: " + before.toString(2) + " target: " + interrupt.toString(2));
+    saveEmulLog("after req if: " + Atomics.load(this._if, 0).toString(2));
+    */
   }
 
   clearInterrupt(interrupt) {
     //this._if[0] &= ~interrupt;
-    Atomics.and(this._if, 0, ~interrupt);
+    const before = Atomics.and(this._if, 0, ~interrupt);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("before clear if: " + before.toString(2) + " target: " + interrupt.toString(2));
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("after clear if: " + Atomics.load(this._if, 0).toString(2));
   }
 
   callInterrupt(address) {
@@ -1651,7 +1729,7 @@ class GameBoy {
   }
 
   writeAddress(address, value) {
-    switch (address >> 13) {
+    switch (address >> 13) { // 000/0 0000 0000 0000
       case 0x0:
       case 0x1:
       case 0x2:
@@ -1683,8 +1761,24 @@ class GameBoy {
                 this.joypad.p1 = value;
                 break;
               case 0x01:
-                //customLog("[set sb by cpu] ");
                 this.serial.sb = value;
+
+                /*
+                    self sb
+                */
+                let time = -1;
+                if(this._isSerialHandlerWorking == false) {
+                  (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("postMessage sb at self set sb");
+                  time = 1;
+                } else {
+                  (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("postMessage sb at serial set sb");
+                }
+
+                self.postMessage({msg: 'sb', payload: value, time: time});    
+                  
+                Atomics.store(this.postLock, 0, 1);
+                Atomics.wait(this.postLock, 0, 1);  
+
                 break;
               case 0x02:
                 //saveEmulLog("ff02: " + value);
@@ -1692,16 +1786,51 @@ class GameBoy {
                 this.serial.sc = value;
 
                 if ((value | 0x7E) === 0xFE) {
+                  (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set sc " + value + " at pc: " + this.pc);
+                  
+
                   Atomics.store(this._waitForSc, 0, 1);
                   (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_6__.customLog)("update sc ", value);
 
-                  self.postMessage({msg: 'sc', payload: -1, time:-1});
                   /*
-                  if(Atomics.load(this._scDirty, 0) === 1) {
-                    //Atomics.store(this._lock, 0, 1);
-                    //Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0
+                      move send 'sc' to the RETI.
+                      recvQ_A
+                      sendR_A, set serial interrupt_A
+                      recvQ'_B
+                      serial handler_A
+                        set sc 130, postMessage'sc'
+                          sendR'_B, set serial interrupt'_B
+                      RETI_A     
+                      //serial handler for serial interrupt'_B is not called.
+                      
+                      //so, prevent serial_interrupt'_B is wasted.
+                      //change postMessage'sc' timing from 'before RETI' to 'after RETI' 
+
+                      serial handler {
+                        set sc 128 or set sc 130
+                      } RETI
+                  */
+
+                  let time = -1;
+                  if(this.pc === 18933) {
+                    this.selfScCount++;
+            
+                    this.isSelfScAtPc18933 = true;
+                    //this.logSelfScAtPc18933 = true;
+                    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("18933 order: " + this.selfScCount);
+                    
+                    if(this.selfScCount == 5) {
+                      time = 1;
+                    }
                   }
-                   */
+                  (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("postMessage sc");
+                  self.postMessage({msg: 'sc', payload: this.serial.sb, time:time});
+
+                  Atomics.store(this.postLock, 0, 1);
+                  Atomics.wait(this.postLock, 0, 1);
+
+                  //Atomics.wait(this._scMonitor, 0, 1);
+                  //Atomics.wait(this.writeLock, 0, 1);
                 }
 
                 break;
@@ -1798,9 +1927,42 @@ class GameBoy {
             }
           }
         } else if (address <= 0xfffe) {
+          if(address == 0xffc1) {
+            /*
+            Atomics.store(this._waitForC1, 0 ,1);
+            saveEmulLog("write 0xffc1: " + value + " hdma: " + this.display.hdmaOn + " halt: " + this.halt +
+              " logCounter: " + (this.logCounter--)
+            );
+            this._logC1Flag = false;
+            */
+            
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("postMessage c1 at write");
+            self.postMessage({msg: 'c1', payload: this.serial.sb, time: value});
+
+            Atomics.store(this.postLock, 0, 1);
+            Atomics.wait(this.postLock, 0, 1);
+
+            Atomics.wait(this.writeLock, 0, 1);
+
+            /*
+            saveEmulLog("write 0xffc1: " + value + " hdma: " + this.display.hdmaOn + " halt: " + this.halt +
+              " logCounter: " + (this.logCounter--)
+            );
+            */
+          }
+          
           this.hram[address & 0x7f] = value;
+
+        if(this.isSelfScAtPc18933){
+          if(address == 0xffd6 && value == 0) {
+            this.isSelfScAtPc18933 = false;
+            self.postMessage({msg: 'sm', payload: this.serial.sb, time: value});
+          }
+        }
+
         } else {
           this.ie = value;
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("ie = ", value.toString(2));
         }
         break;
     }
@@ -1978,11 +2140,13 @@ class GameBoy {
       this.display.hdmaCounter--;
       if (this.display.hdmaCounter == 0) {
         this.display.hdmaOn = false;
+        //saveEmulLog("hdmaOn set false at hdmaCount == 0");
         this.display.hblankHdmaOn = false;
         this.display.hdmaTrigger = false;
       }
       if (this.display.hblankHdmaOn) {
         this.display.hdmaOn = false;
+        //saveEmulLog("hdmaOn set false at hblankHdmaOn");
       }
     }
   }
@@ -1997,6 +2161,17 @@ class GameBoy {
     if ((this.ime || this.halt) && (this.ie & this.if) != 0) {
       this.halt = false;
       if (this.ime) {
+
+        if(this.logSelfScAtPc18933){
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[processRecvQ ~ jump] at interrupt: " + (this.ie & this.if).toString(2) +
+          " oldPc: " + this.oldPc +
+          " pc: " + this.pc);
+        }
+
+        if(this._logC1Flag) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[RETI ~ write] at interrupt: " + (this.ie & this.if).toString(2));
+        }
+
         this.ime = false;
         if ((this.ie & this.if & GameBoy.vblankInterrupt) != 0) {
           this.clearInterrupt(GameBoy.vblankInterrupt);
@@ -2008,15 +2183,44 @@ class GameBoy {
           this.clearInterrupt(GameBoy.timerInterrupt);
           this.callInterrupt(0x0050);
         } else if ((this.ie & this.if & GameBoy.serialInterrupt) != 0) {
+          
+          /*
+              end of logging
+          */
+          this.logSelfScAtPc18933 = false;
+
+          if(this.logCounter != 0) {
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("something among jump,RETI,write missed or over :" + this.logCounter);
+          }
+          this.logCounter = 3;
+
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("jump to serial interrupt handler, ie: " + 
+            (this.ie).toString(2) +
+          " if: " +
+            (this.if).toString(2) +
+          " a : " + this.a +
+          " pc: " + this.pc +
+          " ffc1: " + this.readAddress(0xffc1) +
+          " logCounter: " + (this.logCounter--));
+
+          //this._setAFlag = true;
           this.clearInterrupt(GameBoy.serialInterrupt);
           this.callInterrupt(0x0058);
+          this._isSerialHandlerWorking = true;
+          
         } else if ((this.ie & this.if & GameBoy.joypadInterrupt) != 0) {
           this.clearInterrupt(GameBoy.joypadInterrupt);
           this.callInterrupt(0x0060);
         }
         cycles += 5;
+      } else {
+        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("cpu do nothing");
+        console.log("cpu do nothing?!");
       }
     } else {
+      if(this._logC1Flag) {
+        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[RETI ~ write] at not intr: halt: " + this.halt + ", hdmaOn: " + this.display.hdmaOn);
+      }
       cycles += (this.halt || this.display.hdmaOn) ? 1 : this.decode();
     }
 
@@ -2040,15 +2244,49 @@ class GameBoy {
     if (this.display.hdmaTrigger) {
       this.display.hdmaTrigger = false;
       this.display.hdmaOn = true;
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("hdmaOn true at hdmaTrigger");
     }
 
     return cycles / (this.doubleSpeed ? 2 : 1);
   }
 
   decode() {
+    this.oldPc = this.pc;
     const instr = this.readAddress(this.pc++);
+
+    if(this.logSelfScAtPc18933){
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[processRecvQ ~ jump] at instr: " + (instr.toString(2)) +
+      " oldPc: " + this.oldPc +
+      " pc: " + this.pc);
+    }
+
+    if(this._setAFlag) {
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("during set A instr: " + (instr.toString(2)));
+    }
+
     let cycles = GameBoy.instrCycles[instr];
     const quad = instr >> 6, op1 = (instr & 0x3f) >> 3, op2 = instr & 0x7;
+
+    if(this.logSelfScAtPc18933){
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[processRecvQ ~ jump] at decode: " +  (instr.toString(2)) + 
+      " quad: " +
+    quad + 
+    " op1: " +
+    op1 +
+    " op2: " +
+    op2);
+    }
+
+    if(this._logC1Flag) {
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[RETI ~ write] at decode: " +  (instr.toString(2)) + 
+      " quad: " +
+    quad + 
+    " op1: " +
+    op1 +
+    " op2: " +
+    op2);
+    }
+
     if (quad === 0) {
       if (op2 == 6) {
         // LD r, n
@@ -2281,9 +2519,33 @@ class GameBoy {
         // LD A, (n)
         const imm = this.readAddress(this.pc++);
         this.a = this.readAddress(0xff00 | imm);
+        if( this._setAFlag) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set a: " + this.a + " from addr: 0x" + (0xff00 | imm).toString(16));
+        }
       } else if (op1 == 4 && op2 == 0) {
         // LD (n), A
         const imm = this.readAddress(this.pc++);
+
+        const targetAddr = (0xff00 | imm);
+
+        if(this.logSelfScAtPc18933){
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("LD "+ targetAddr.toString(16) + ", " + this.a);
+        }
+
+        if(this._setAFlag) {
+          if(targetAddr == 0xff01) {
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set sb with a: " + this.a);
+          } else if(targetAddr == 0xff02) {
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set sc with a: " + this.a);
+          } else {
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set 0x" + targetAddr.toString(16) + " with a: " + this.a);
+          }
+        }
+
+        if(targetAddr == 0xffc1) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set 0xffc1: " + this.a + " setAflag: " + this._setAFlag);
+        }
+        
         this.writeAddress(0xff00 | imm, this.a);
       } else if (op1 == 7 && op2 == 2) {
         // LD A, (nn)
@@ -2294,7 +2556,13 @@ class GameBoy {
         // LD (nn), A
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
-        this.writeAddress((imm2 << 8) | imm1, this.a);
+        const targetAddr = (imm2 << 8) | imm1;
+
+        if(this.logSelfScAtPc18933){
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("LD "+ targetAddr.toString(16) + ", " + this.a);
+        }
+
+        this.writeAddress(targetAddr, this.a);
       } else if (op1 == 7 && op2 == 1) {
         // LD SP, HL
         this.sp = this.hl;
@@ -2434,29 +2702,67 @@ class GameBoy {
         // RET
         this.pc = this.readAddress(this.sp++);
         this.pc |= this.readAddress(this.sp++) << 8;
+        if(this._setAFlag) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("RET ");
+          this._setAFlag = false;
+        }
       } else if (op1 == 3 && op2 == 1) {
         // RETI
         this.pc = this.readAddress(this.sp++);
         this.pc |= this.readAddress(this.sp++) << 8;
         this.ime = true;
+       
+        if(this._isSerialHandlerWorking) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("RETI pc: " + this.pc +  " logCounter: " + (this.logCounter--));
+          /*
+          self.postMessage({msg: 'reti', payload: -1, time: -1});    
+          
+          Atomics.store(this.postLock, 0, 1);
+          Atomics.wait(this.postLock, 0, 1);   
+
+          Atomics.wait(this.writeLock, 0, 1);
+          */
+          this._isSerialHandlerWorking = false;
+        }
+
+
+        if(this._setAFlag) {
+          this._setAFlag = false;
+        }
+        /*
+        if(Atomics.load(this._waitForC1, 0) === 0) {
+          this._logC1Flag = true;
+        }
+        */  
       } else if ((op1 & 0x4) == 0 && op2 == 0) {
         // RET cc
         if (this.readCondition(op1 & 0x3)) {
           this.pc = this.readAddress(this.sp++);
           this.pc |= this.readAddress(this.sp++) << 8;
           cycles += 3;
+          if(this._setAFlag) {
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("RET CC ");
+            this._setAFlag = false;
+          }
         }
       } else if (op2 == 7) {
         // RST t
         this.writeAddress(--this.sp, this.pch);
         this.writeAddress(--this.sp, this.pcl);
         this.pc = op1 << 3;
+        if(this._setAFlag) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("RST t");
+          this._setAFlag = false;
+        }
       } else if (op1 == 6 && op2 == 3) {
         // DI
         this.ime = false;
       } else if (op1 == 7 && op2 == 3) {
         // EI
         this.ime = true;
+        if(this.logSelfScAtPc18933){
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("ime set true, ie: " + (this.ie).toString(2) + " if: " + (this.if).toString(2));
+        }
       } else {
         throw 'unknown instruction: 0x' + instr.toString(16);
       }
@@ -2595,12 +2901,12 @@ GameBoy.cbInstrCycles = [
   2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
   2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2,
 ];
-GameBoy.joypadInterrupt = 0x10;
-GameBoy.serialInterrupt = 0x8;
-GameBoy.timerInterrupt = 0x4;
-GameBoy.statInterrupt = 0x2;
-GameBoy.vblankInterrupt = 0x1;
-GameBoy.interrupts = 0x1f;
+GameBoy.joypadInterrupt = 0x10;   // 0001 0000
+GameBoy.serialInterrupt = 0x8;    // 0000 1000
+GameBoy.timerInterrupt = 0x4;     // 0000 0100
+GameBoy.statInterrupt = 0x2;      // 0000 0010
+GameBoy.vblankInterrupt = 0x1;    // 0000 0001
+GameBoy.interrupts = 0x1f;        // 0001 1111
 
 GameBoy.startTime = 0;
 
@@ -2618,8 +2924,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./cpu.js */ "./public/js/gb/cpu.js");
 /* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../../dummylogger.js */ "./public/dummylogger.js");
+/* harmony import */ var _emulworker_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ../emulworker.js */ "./public/js/emulworker.js");
 
  // Adjust based on actual exports
+
 
 class Display {
     constructor(gb) {
@@ -2802,9 +3110,11 @@ class Display {
             return;
         }
         this.hdmaOn = (value & 0x80) == 0;
+        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_2__.saveEmulLog)("hdmaOn set " + this.hdmaOn);
         this.hblankHdmaOn = (value & 0x80) != 0;
         if (this.hblankHdmaOn && this.mode == Display.modes.hblank) {
             this.hdmaOn = true;
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_2__.saveEmulLog)("hdmaOn set true at hblank");
         }
         this._hdma5 = value;
         this.hdmaCounter = (value & 0x7f) + 1;
@@ -3349,19 +3659,19 @@ class Serial {
 
   get sb() {
     const value = Atomics.load(this._sb, 0);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("<< get sb ", value);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)("<< get sb ", value);
     return value;
   }
 
   set sb(value) {
     Atomics.store(this._sb, 0, value);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(">> set sb ", value);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)(">> set sb ", value);
   }
 
   get sc() {
     //return 0x7e | (this.transferRunning << 7) | this.useInternalClock[0];
     const value = Atomics.load(this._sc, 0);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("<< get sc ", value);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)("<< get sc ", value);
     return (0x7e | value);
   }
 
@@ -3371,7 +3681,7 @@ class Serial {
                 129  0x 1000 0001
      */
     Atomics.store(this._sc, 0, value);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(">> set sc ", value);
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)(">> set sc ", value);
 
     if ((value | 0x7E) === 0xFF) {
       this.transferInProgress = true;
@@ -3385,6 +3695,8 @@ class Serial {
     } else if ( clockSpeed === 0b0 ){
       Serial.transferTime = Serial.cpuCyclesPerCycle * 8;
       //console.log("normal: " + Serial.transferTime);
+    } else {
+      console.log("sc clockSpeed bit exception " + value);
     }
   }
 
@@ -4064,8 +4376,6 @@ class Sound {
 
     cycle() {
         this.cycles += Sound.cyclesPerCPUCycle;
-        //this.cycles = (this.cycles + Sound.cyclesPerCPUCycle) % this.bufferLen; // 4096(bufferSamples) * 8 == 32768
-
         if (this.soundEnable) {
             if (this.cycles % Sound.cyclesPerSample == 0) {
                 this.updateTrigger();
