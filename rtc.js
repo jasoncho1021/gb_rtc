@@ -35281,7 +35281,6 @@ function setSlave(value) {
   Atomics.store(waitForSc, 0, 0);
 }
 
-/*
 const startDemoButton = document.getElementById('startDemoButton');
 startDemoButton.addEventListener('click', () => {
   const xhr = new XMLHttpRequest();
@@ -35293,10 +35292,10 @@ startDemoButton.addEventListener('click', () => {
       }
     }
   });
-  xhr.open('GET', '/public/MarioTennis.gbc'); // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
+  xhr.open('GET', 'test.gbc'); // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
   xhr.send();
 });
-*/
+
 
 document.addEventListener('keydown', (ev) => {
   (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)('pressed: ' + ev.code);
@@ -35444,15 +35443,16 @@ document.addEventListener('click', () => {
 });
 */
 
+/*
 const romFileInput = document.getElementById('romFileInput');
 let romFile;
 romFileInput.addEventListener('change', () => {
-  /*
+  
   if (running) {
     gb.cartridge.save();
     running = false;
   }
-  */
+
   const reader = new FileReader();
   reader.addEventListener('load', () => {
     romFile = reader.result;
@@ -35460,6 +35460,7 @@ romFileInput.addEventListener('change', () => {
   });
   reader.readAsArrayBuffer(romFileInput.files[0]);
 });
+*/
 
 const canvas = document.getElementById('waveform');
 const canvasCtx = canvas.getContext('2d');
