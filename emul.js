@@ -78,6 +78,8 @@ const txtDecoder = new TextDecoder();
 let sharedCurrentSizeBuffer;
 let sharedCurrentSize;
 
+let multiPlay = false;
+
 function saveEmulLog(...args) {
   //saveLogImpl(...args);
   //console.log(args.join(' '));
@@ -131,6 +133,7 @@ self.onmessage = event => {
   const {msg, payload} = event.data;
   switch (msg) {
     case 'init':
+      multiPlay = payload.multiPlay;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas = payload.canvas;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
@@ -239,7 +242,8 @@ function preStart() {
 }
 
 let cpuCycles = 0;
-const PERIOD = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame/4;
+const TIMESTAMP_COUNT_PER_FRAME = 1;
+const PERIOD = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame/TIMESTAMP_COUNT_PER_FRAME;
 
 function noDelayUpdate() {
   const startTime = performance.now();
@@ -258,32 +262,9 @@ function noDelayUpdate() {
         console.log("rtc");
         gb.cartridge.rtc.updateTime();
     }
-    
-    let needHeadSync = true;
 
     while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
         try {
-
-          /*
-              1 per gap
-          */
-          if(needHeadSync) {
-            needHeadSync = false;
-            tsIdx = (tsIdx + 1) % 10;
-
-            mu.lock();
-
-            self.postMessage({
-              msg: 'ts',
-              payload: tsIdx,
-              time: -1
-            });
-            saveLog("ts request " + tsIdx);
-            Atomics.store(timestampLock, 0, 1);
-            saveLog("ts blocked " + tsIdx);
-            Atomics.wait(timestampLock, 0, 1);
-            saveLog("ts unblocked " + tsIdx);
-          }
 
             cpuCycles = gb.cycle();
             cycles += cpuCycles;
@@ -292,27 +273,28 @@ function noDelayUpdate() {
               [TODO]
               if the user try to start 1p,
               this logic should be skipped
-            
-            timestamp += cpuCycles;
-            if(timestamp >= PERIOD) {
-              timestamp = timestamp - PERIOD;
-
-              tsIdx = (tsIdx + 1) % 10;
-
-              mu.lock();
-
-              self.postMessage({
-                msg: 'ts',
-                payload: tsIdx,
-                time: -1
-              });
-              saveLog("ts request " + tsIdx);
-              Atomics.store(timestampLock, 0, 1);
-              saveLog("ts blocked " + tsIdx);
-              Atomics.wait(timestampLock, 0, 1);
-              saveLog("ts unblocked " + tsIdx);
-            }
             */
+            if(multiPlay) {
+              timestamp += cpuCycles;
+              if(timestamp >= PERIOD) {
+                timestamp = timestamp - PERIOD;
+
+                tsIdx = (tsIdx + 1) % 10;
+
+                mu.lock();
+
+                self.postMessage({
+                  msg: 'ts',
+                  payload: tsIdx,
+                  time: -1
+                });
+                saveLog("ts request " + tsIdx);
+                Atomics.store(timestampLock, 0, 1);
+                saveLog("ts blocked " + tsIdx);
+                Atomics.wait(timestampLock, 0, 1);
+                saveLog("ts unblocked " + tsIdx);
+              }
+            }
         } catch (error) {
             console.error(error);
             running = false;
@@ -661,11 +643,11 @@ function printFps() {
   if(fps !== _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps) {
     isSame = false; 
   } 
-  self.postMessage({msg: 'F', payload: letter, time:isSame});
+  //self.postMessage({msg: 'F', payload: letter, time:isSame});
+  self.postMessage({msg: 'F', payload: fps, time:true});
 
   saveLog("%c FPS= " + letter, "background:cyan; color:black");
-  saveLog("%c 1 sec= " + setIntGap,
-      "background:cyan; color:red");
+  saveLog("%c 1 sec= " + setIntGap, "background:cyan; color:red");
   _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps = 0;
   fps = 0;
   printOld = current;

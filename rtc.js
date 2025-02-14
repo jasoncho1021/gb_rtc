@@ -34398,12 +34398,15 @@ function printLogAll() {
   logger.postMessage({option:1, data:-1});
 }
 
+const pingResult = document.querySelector('#pingResult');
 let pingSend;
 function pingChecker() {
   let count = 0;
+  pingResult.textContent = "[";
   const intervalId = setInterval(() => {
     if(count++ == 5) {
       clearInterval(intervalId);
+      pingResult.textContent += " ] finish";
       return;
     }
     pingSend = Date.now();
@@ -34720,13 +34723,20 @@ function webSocketHandler(e) {
 
   const obj = JSON.parse(e.data);
   switch (obj.type) {
+    case 'L':
+      recvL = true;
+      if(isWaitingPlayer) {
+        runGame(gameData.rom, gameData.multiPlay);
+      }
+      break;
     case 'P':
       if(obj.msg == "0") {
         sendMessage("P 1");
         return;
       }
      
-      console.log("ping: ", Date.now() - pingSend);
+      const pingValue = Date.now() - pingSend;
+      pingResult.textContent += (" " + pingValue);
 
       break;
     case 'Q':
@@ -34805,6 +34815,7 @@ function skipWaiting() {
 let fpsCount = 1;
 let redCount = 1;
 let reachPeriod = false;
+const fpsPrint = document.getElementById('fps');
 
 function isWriteLockBlocking() {
   return (Atomics.load(writeLock, 0) === 1);
@@ -35043,6 +35054,7 @@ function workerHandler(event) {
       releasePostLock();
       break;
     case 'F':
+      /*
       let element = document.querySelector('body > div.container-fluid.my-3 > div > div:nth-child(1)');
       if(!time) {
         element.style.color = 'red';
@@ -35053,7 +35065,9 @@ function workerHandler(event) {
         element.innerHTML = payload + " " + fpsCount;
       }
       fpsCount++;
+      */
 
+      fpsPrint.innerText = payload;
       break;
     case 'M':
       worker.postMessage({
@@ -35267,6 +35281,7 @@ function setSlave(value) {
   Atomics.store(waitForSc, 0, 0);
 }
 
+/*
 const startDemoButton = document.getElementById('startDemoButton');
 startDemoButton.addEventListener('click', () => {
   const xhr = new XMLHttpRequest();
@@ -35281,6 +35296,7 @@ startDemoButton.addEventListener('click', () => {
   xhr.open('GET', '/public/MarioTennis.gbc'); // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
   xhr.send();
 });
+*/
 
 document.addEventListener('keydown', (ev) => {
   (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)('pressed: ' + ev.code);
@@ -35316,6 +35332,7 @@ function keyHandler(ev) {
   }
 }
 
+/*
 function mouseHandler(ev) {
   const childDiv = ev.target.closest('.childDiv'); // Replace '.childDiv' with your child div class
   let keyNumber;
@@ -35347,15 +35364,40 @@ parentDiv.addEventListener('touchend', (ev) => {
   messageQueue.push({callback: mouseHandler, event: ev});
   processNextMessage();
 });
+*/
 
+const multiPlayCheckBox = document.querySelector('#multiPlayCheckBox');
+let gameData;
+let recvL = false;
+let isWaitingPlayer = false;
+const waitingText = document.getElementById('waitingText');
 
 function startGame(rom) {
-  initSound();
+  const multiPlay = multiPlayCheckBox.checked;
+  if(multiPlay) {
+    sendMessage("L " + _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole);
 
-  /*
-      disable MarioTennis code 
-  */
-  //Atomics.store(waitForC1, 0, 1);
+    if(recvL) {
+      runGame(rom, multiPlay);
+    } else {
+      isWaitingPlayer = true;
+      gameData = {rom, multiPlay};
+      waitingText.textContent = 'Waiting for the other player';
+      waitingText.classList.remove('paused');
+    }
+    return;
+  }
+  runGame(rom, multiPlay);
+}
+
+function runGame(rom, multiPlay) {
+  if(multiPlay && isWaitingPlayer) {
+    isWaitingPlayer = false;
+    waitingText.textContent = '';
+    waitingText.classList.add('paused');
+  }
+
+  initSound();
 
   const uInt8Array = new Uint8Array(rom);
   const canvasWorker = document.getElementById(
@@ -35364,6 +35406,7 @@ function startGame(rom) {
   worker.postMessage({
         msg: 'init',
         payload: {
+          multiPlay: multiPlay,
           canvas: canvasWorker, uInt8Array: uInt8Array,
           flagSharedBuffer: flagSharedBuffer,
           sbSharedBuffer: sbSharedBuffer,
@@ -35481,6 +35524,7 @@ copyBtn.addEventListener('click', () => {
         console.error('Failed to copy: ', err);
     });
 })
+
 
 /***/ }),
 
@@ -36428,16 +36472,26 @@ let dataChannel = null;
 
 let netRole = -1;
 
+const multiPlayCheckBox = document.getElementById('multiPlayCheckBox');
+const netButtons = document.getElementById('buttons');
+
+let connectedDialog = null;
+
 function init() {
+  multiPlayCheckBox.addEventListener('change', () => {
+    netButtons.classList.toggle('togglehidden');
+  });
+
   document.querySelector('#joinBtn').disabled = false;
   document.querySelector('#createBtn').disabled = false;
-  document.querySelector('#hangupBtn').disabled = false;
   
   document.querySelector('#hangupBtn').addEventListener('click', hangUp);
   document.querySelector('#createBtn').addEventListener('click', createRoom);
   document.querySelector('#joinBtn').addEventListener('click', joinRoom);
   //roomDialog = new mdc.dialog.MDCDialog(document.querySelector('#room-dialog'));
   roomDialog = new _material_dialog__WEBPACK_IMPORTED_MODULE_9__.MDCDialog(document.querySelector('#room-dialog'));
+
+  connectedDialog = new _material_dialog__WEBPACK_IMPORTED_MODULE_9__.MDCDialog(document.querySelector('#connected-dialog'));
 
   document.querySelector('#printLogBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.printLogAll);
   document.querySelector('#pingCheckerBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.pingChecker);
@@ -36457,6 +36511,8 @@ async function createRoom() {
 
   document.querySelector('#createBtn').disabled = true;
   document.querySelector('#joinBtn').disabled = true;
+  document.querySelector('#copyBtn').disabled = false;
+
   //const db = firebase.firestore()
   const db = (0,firebase_firestore__WEBPACK_IMPORTED_MODULE_1__.getFirestore)(app);
   //const roomRef = await db.collection('rooms').doc();
@@ -36653,6 +36709,10 @@ async function hangUp(e) {
 
 function dataChannelOpened() {
   console.log('data channel opened!');
+  document.querySelector('#pingCheckerBtn').disabled = false;
+  document.querySelector('#hangupBtn').disabled = false;
+  document.querySelector('#copyBtn').disabled = true;
+  connectedDialog.open();
 }
 
 function dataChannelClosed() {
