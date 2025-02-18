@@ -34275,6 +34275,97 @@ __webpack_require__.r(__webpack_exports__);
 
 /***/ }),
 
+/***/ "./public/generate_pushid.js":
+/*!***********************************!*\
+  !*** ./public/generate_pushid.js ***!
+  \***********************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   generatePushID: () => (/* binding */ generatePushID)
+/* harmony export */ });
+/**
+ * This code is originated from a gist https://gist.github.com/mikelehen/3596a30bd69384624c11
+ * I found the gist link at https://firebase.googleblog.com/2015/02/the-2120-ways-to-ensure-unique_68.html
+ *
+ * Modified the original code somewhat so that the generated id can be easily distinguishable by human eye
+ * and Web Crypto API is used instead of Math.random if available.
+ */
+
+
+/**
+ * Fancy ID generator that creates 20-character string identifiers with the following properties:
+ *
+ * 1. They're based on timestamp so that they sort *after* any existing ids.
+ * 2. They contain 50-bits of random data after the timestamp so that IDs won't collide with other clients' IDs.
+ * 3. They sort *lexicographically* (so the timestamp is converted to characters that will sort properly).
+ * 4. They're monotonically increasing.  Even if you generate more than one in the same timestamp, the
+ *    latter ones will sort after the former ones.  We do this by using the previous random bits
+ *    but "incrementing" them by 1 (only in the case of a timestamp collision).
+ */
+const generatePushID = (function () {
+  // Modeled after base32 web-safe chars, but ordered by ASCII.
+  const PUSH_CHARS = '23456789abcdefghijkmnpqrstuvwxyz';
+
+  // Timestamp of last push, used to prevent local collisions if you push twice in one ms.
+  let lastPushTime = 0;
+
+  // We generate 50-bits of randomness which get turned into 10 characters (since 32 === 2^5, (2^5)^10 === 2^50 )
+  // and appended to the timestamp to prevent collisions with other clients. We store the last characters we
+  // generated because in the event of a collision, we'll use those same characters except
+  // "incremented" by one.
+  const lastRandChars = [];
+
+  return function () {
+    let now = Date.now();
+    const duplicateTime = now === lastPushTime;
+    lastPushTime = now;
+
+    const timeStampChars = new Array(10);
+    for (let i = 9; i >= 0; i--) {
+      timeStampChars[i] = PUSH_CHARS.charAt(now % 32);
+      // NOTE: Can't use << here because javascript will convert to int and lose the upper bits.
+      now = Math.floor(now / 32);
+    }
+    if (now !== 0)
+      throw new Error('We should have converted the entire timestamp.');
+
+    let id = timeStampChars.join('');
+    if (!duplicateTime) {
+      let array;
+      if (
+        typeof window.crypto !== 'undefined' &&
+        window.crypto.getRandomValues
+      ) {
+        array = new Uint32Array(10);
+        window.crypto.getRandomValues(array);
+      }
+      for (let i = 0; i < 10; i++) {
+        lastRandChars[i] = array
+          ? array[i] % 32
+          : Math.floor(Math.random() * 32);
+      }
+    } else {
+      // If the timestamp hasn't changed since last push, use the same random number, except incremented by 1.
+      let i;
+      for (i = 9; i >= 0 && lastRandChars[i] === 31; i--) {
+        lastRandChars[i] = 0;
+      }
+      lastRandChars[i]++;
+    }
+    for (let i = 0; i < 10; i++) {
+      id += PUSH_CHARS.charAt(lastRandChars[i]);
+    }
+    if (id.length !== 20) throw new Error('Length should be 20.');
+
+    return id;
+  };
+})();
+
+
+/***/ }),
+
 /***/ "./public/js/adapter.js":
 /*!******************************!*\
   !*** ./public/js/adapter.js ***!
@@ -36412,15 +36503,17 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var firebase_firestore__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! firebase/firestore */ "./node_modules/firebase/firestore/dist/esm/index.esm.js");
 /* harmony import */ var _messenger_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./messenger.js */ "./public/messenger.js");
 /* harmony import */ var _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./js/adapter.js */ "./public/js/adapter.js");
-/* harmony import */ var bootstrap__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! bootstrap */ "./node_modules/bootstrap/dist/js/bootstrap.esm.js");
-/* harmony import */ var bootstrap_dist_css_bootstrap_min_css__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! bootstrap/dist/css/bootstrap.min.css */ "./node_modules/bootstrap/dist/css/bootstrap.min.css");
-/* harmony import */ var _mcw_css__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ./mcw.css */ "./public/mcw.css");
-/* harmony import */ var _gameboy_css__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ./gameboy.css */ "./public/gameboy.css");
-/* harmony import */ var _material_ripple_index__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! @material/ripple/index */ "./node_modules/@material/ripple/component.js");
-/* harmony import */ var _material_dialog__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! @material/dialog */ "./node_modules/@material/dialog/component.js");
+/* harmony import */ var _generate_pushid_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./generate_pushid.js */ "./public/generate_pushid.js");
+/* harmony import */ var bootstrap__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! bootstrap */ "./node_modules/bootstrap/dist/js/bootstrap.esm.js");
+/* harmony import */ var bootstrap_dist_css_bootstrap_min_css__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! bootstrap/dist/css/bootstrap.min.css */ "./node_modules/bootstrap/dist/css/bootstrap.min.css");
+/* harmony import */ var _mcw_css__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ./mcw.css */ "./public/mcw.css");
+/* harmony import */ var _gameboy_css__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! ./gameboy.css */ "./public/gameboy.css");
+/* harmony import */ var _material_ripple_index__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! @material/ripple/index */ "./node_modules/@material/ripple/component.js");
+/* harmony import */ var _material_dialog__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! @material/dialog */ "./node_modules/@material/dialog/component.js");
 
 //import { initializeApp }  from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
 //import { getFirestore, collection, getDocs, setDoc, deleteDoc, onSnapshot, doc, addDoc, updateDoc, getDocFromServer }  from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+
 
 
 
@@ -36436,7 +36529,7 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-const ripple = new _material_ripple_index__WEBPACK_IMPORTED_MODULE_8__.MDCRipple(document.querySelector('.mdc-button'));
+const ripple = new _material_ripple_index__WEBPACK_IMPORTED_MODULE_9__.MDCRipple(document.querySelector('.mdc-button'));
 //mdc.ripple.MDCRipple.attachTo(document.querySelector('.mdc-button'));
 
 // Your web app's Firebase configuration
@@ -36490,9 +36583,9 @@ function init() {
   document.querySelector('#createBtn').addEventListener('click', createRoom);
   document.querySelector('#joinBtn').addEventListener('click', joinRoom);
   //roomDialog = new mdc.dialog.MDCDialog(document.querySelector('#room-dialog'));
-  roomDialog = new _material_dialog__WEBPACK_IMPORTED_MODULE_9__.MDCDialog(document.querySelector('#room-dialog'));
+  roomDialog = new _material_dialog__WEBPACK_IMPORTED_MODULE_10__.MDCDialog(document.querySelector('#room-dialog'));
 
-  connectedDialog = new _material_dialog__WEBPACK_IMPORTED_MODULE_9__.MDCDialog(document.querySelector('#connected-dialog'));
+  connectedDialog = new _material_dialog__WEBPACK_IMPORTED_MODULE_10__.MDCDialog(document.querySelector('#connected-dialog'));
 
   document.querySelector('#printLogBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.printLogAll);
   document.querySelector('#pingCheckerBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.pingChecker);
@@ -36516,10 +36609,16 @@ async function createRoom() {
 
   //const db = firebase.firestore()
   const db = (0,firebase_firestore__WEBPACK_IMPORTED_MODULE_1__.getFirestore)(app);
+
+  const genRoomId = (0,_generate_pushid_js__WEBPACK_IMPORTED_MODULE_4__.generatePushID)();
+
+  /*
   //const roomRef = await db.collection('rooms').doc();
-  const roomCol = (0,firebase_firestore__WEBPACK_IMPORTED_MODULE_1__.collection)(db, 'rooms');
+  const roomCol = collection(db, 'rooms');
   //const roomRef = await getDocs(roomCol);
-  const roomRef = (0,firebase_firestore__WEBPACK_IMPORTED_MODULE_1__.doc)(roomCol);
+  const roomRef = doc(roomCol);
+  */
+  const roomRef = (0,firebase_firestore__WEBPACK_IMPORTED_MODULE_1__.doc)(db, 'rooms', genRoomId);
 
   console.log('Create PeerConnection with configuration: ', configuration);
   peerConnection = new RTCPeerConnection(configuration);
