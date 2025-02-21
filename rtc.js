@@ -35394,7 +35394,7 @@ startDemoButton.addEventListener('click', () => {
       }
     }
   });
-  xhr.open('GET', '/public/test.gbc'); //test.gbc // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
+  xhr.open('GET', 'test.gbc'); //test.gbc // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
   xhr.send();
 });
 
