@@ -34275,6 +34275,26 @@ __webpack_require__.r(__webpack_exports__);
 
 /***/ }),
 
+/***/ "./node_modules/worker-url/index.js":
+/*!******************************************!*\
+  !*** ./node_modules/worker-url/index.js ***!
+  \******************************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   WorkerUrl: () => (/* binding */ WorkerUrl)
+/* harmony export */ });
+function WorkerUrl(url, options) {
+	if (!options) return url;
+	const { customPath } = options;
+	if (!customPath) return url;
+	return customPath();
+}
+
+
+/***/ }),
+
 /***/ "./public/generate_pushid.js":
 /*!***********************************!*\
   !*** ./public/generate_pushid.js ***!
@@ -34379,24 +34399,30 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   webSocketOnMessage: () => (/* binding */ webSocketOnMessage)
 /* harmony export */ });
 /* harmony import */ var _rtc_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../rtc.js */ "./public/rtc.js");
-/* harmony import */ var _logger_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../logger.js */ "./public/logger.js");
+/* harmony import */ var _orderlock_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./orderlock.js */ "./public/js/orderlock.js");
 /* harmony import */ var _sync_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./sync.js */ "./public/js/sync.js");
+/* harmony import */ var worker_url__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! worker-url */ "./node_modules/worker-url/index.js");
+
+ 
 
 
 
+const workerUrl = new worker_url__WEBPACK_IMPORTED_MODULE_3__.WorkerUrl(
+  new URL(/* worker import */ __webpack_require__.p + __webpack_require__.u("emulworker"), __webpack_require__.b), { name: 'emulworker'},
+);
+const worker = new Worker(workerUrl);
 
-//const { Mutex } = self;
+const loggerUrl = new worker_url__WEBPACK_IMPORTED_MODULE_3__.WorkerUrl(
+  new URL(/* worker import */ __webpack_require__.p + __webpack_require__.u("logworker"), __webpack_require__.b), { name: 'logworker'},
+);
+const logger = new Worker(loggerUrl);
 
-const worker = new Worker('emul.js', { type: 'module' });
-//const worker = new Worker('./js/emulworker.js', { type: 'module' });  //for public
-const logger = new Worker('log.js', { type: 'module'});
+const orderLock = new _orderlock_js__WEBPACK_IMPORTED_MODULE_1__.OrderLock();
 
-const latency = 0.125;
+
 const bufferSamples = 4096;
 const soundBufferLen = bufferSamples * 8;
 const sampleFrequency = 65536;
-const numChannels = 2;
-const bufferDuration = bufferSamples/sampleFrequency;
 const volume = 0.25;
 
 const flagSharedBuffer = new SharedArrayBuffer(4);
@@ -34439,8 +34465,6 @@ const useInternalClock = new Int32Array(useInternalClockSharedBuffer);
 const scDirty = new Int32Array(scDirtySharedBuffer);
 
 const waitForSc = new Int32Array(waitScBuffer);
-let waitForIO = false;
-let receivedSb;
 
 const waitC1Buffer = new SharedArrayBuffer(4);
 const waitForC1 = new Int32Array(waitC1Buffer);
@@ -34453,7 +34477,6 @@ const messageQueue = [];
 
 const mu = new _sync_js__WEBPACK_IMPORTED_MODULE_2__.Mutex();
 
-let startTime = 0;
 
 const writeBuffer = new SharedArrayBuffer(4);
 const writeLock = new Int32Array(writeBuffer);
@@ -34463,7 +34486,7 @@ const postLock = new Int32Array(postBuffer);
 
 function saveMainLog(...args) {
   const message = args.join(' ');
-  const enterId = _logger_js__WEBPACK_IMPORTED_MODULE_1__.orderLock.getId();
+  const enterId = orderLock.getId();
   const line = "[main] : " + enterId + " $ " + message
   logger.postMessage({option:0, data:line});
 }
@@ -34574,7 +34597,6 @@ let waitC1Queue = [];
 
 function waitTsHandler(){
   sendMessage("TS timestamp");
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("TS to network");
 }
 
 let sendValue;
@@ -34647,6 +34669,7 @@ function waitC1Handler(recvSb, readySb) {
   saveMainLog("waitC1Handler release");
 }
 
+let linkingPhase = false;
 function processRecvQ(receivedSb, readySb) {
 
   /*
@@ -34715,7 +34738,9 @@ function processRecvQ(receivedSb, readySb) {
   */
   consumeC1();
 
+  linkingPhase = false;
   if((receivedSb == 193 && readySb == 192) || (receivedSb == 193 && readySb == 0)) {
+    linkingPhase = true;
     produceC1();
   } 
 
@@ -34767,7 +34792,6 @@ function recvTsHandler() {
   }
 
   if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole === 0) { // starter recvTS
-    (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("netRole 0");
     releasingTimestampLock();        
     /*
       (sendQ  3)                             (sendTS 1)
@@ -34857,7 +34881,6 @@ function webSocketHandler(e) {
       break;
     case 'K':
       skipRequestCount++;
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("skipRequestCount: ", skipRequestCount);
       break;
     case 'TS':
       getAsyncLock(recvTsHandler);
@@ -34866,7 +34889,6 @@ function webSocketHandler(e) {
       getAsyncLock(recvSelfBlockingResponseHandler);
       break;
     default:
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("nothing");
   }
 }
 
@@ -34879,9 +34901,6 @@ function recvSelfBlockingResponseHandler() {
 }
 
 function skipWaiting() {
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("skip waiting");
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("skipRequestCount: ", skipRequestCount);
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("waitTsQueue length: ", waitTsQueue.length);
 /*
   remove received TS
 */
@@ -34958,8 +34977,6 @@ let updatedSb = -1;
 
 function workerHandler(event) {
   const {msg, payload, time} = event.data;
-
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)(    ">> From worker: " + msg + " " + payload + " " + time);
 
   switch (msg) {
     case 'log':
@@ -35110,9 +35127,13 @@ function workerHandler(event) {
       }
       saveMainLog("sc after being locked");
 
-
       if(waitScQueue.length > 0) {
         const {callback, recvSb} = waitScQueue.shift();
+        if(linkingPhase) {
+          releasePostLock();
+          callback(recvSb, payload);
+          return;
+        }
         waitC1Queue.push({callback: waitC1Handler, recvSb: recvSb});
       }
 
@@ -35158,6 +35179,7 @@ function workerHandler(event) {
       fpsCount++;
       */
 
+      saveMainLog("fps: " + payload);
       fpsPrint.innerText = payload;
       break;
     case 'M':
@@ -35177,9 +35199,6 @@ function workerHandler(event) {
       while(Atomics.load(timestampLock, 0) === 0) {
       }
       saveMainLog("tslock after");
-
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("tsIdx: " + payload + " pass spin lock");
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" reach PERIOD");
 
       if(recvF) {
         saveMainLog("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" do not wait, there is recvF, skip sendTS until sendQ.");
@@ -35246,7 +35265,6 @@ function workerHandler(event) {
       } else if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole === -1) {
         /*
         sendMessage("TS timestamp");
-        mainLog("netRole: "+ netRole +" TS to network");
         */
        throw new Error("netRole is set -1");
       } else {
@@ -35256,7 +35274,6 @@ function workerHandler(event) {
       mu.unlock();
       break;
     default:
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("nothing");
   }
 }
 
@@ -35270,7 +35287,11 @@ function initSound(){
   gainNode.gain.value = volume;
   gainNode.connect(soundCtx.destination);
 
-  soundCtx.audioWorklet.addModule('soundprocessor.js').then(() => {
+  const workletUrl = new worker_url__WEBPACK_IMPORTED_MODULE_3__.WorkerUrl(
+    new URL(/* worker import */ __webpack_require__.p + __webpack_require__.u("worklet"), __webpack_require__.b), { name: 'worklet'},
+  );
+
+  soundCtx.audioWorklet.addModule(workletUrl).then(() => {
     const options = {
       outputChannelCount: [2]
     };
@@ -35306,7 +35327,6 @@ function initSound(){
 function blocking() {
   Atomics.store(lock, 0, 1);
   while(Atomics.load(lock, 0) === 0) {};
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)( "++ main blocked ");
 }
 
 function releasingTimestampLock() {
@@ -35316,19 +35336,15 @@ function releasingTimestampLock() {
 }
 
 function getAsyncLock(callback, arg1, arg2) {
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("getAsyncLock");
-
   let asyncLock = mu.lockAsync();
   while(true) {
     if(asyncLock == null) {
       callback(arg1, arg2);
       return;
     } else if(asyncLock.async == false) {
-      (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("retry Lock");
       asyncLock = mu.lockAsync();
     } else if(asyncLock.async == true) {
       asyncLock.value.then(() => {
-        (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("then fulfilled, lock state: " + mu.getState());
         getAsyncLock(callback, arg1, arg2);
       });
       return;
@@ -35339,11 +35355,6 @@ function getAsyncLock(callback, arg1, arg2) {
 function releasing() {
   Atomics.store(lock, 0, 0);
   Atomics.notify(lock, 0, 1);
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("-- main resumed lock");
-}
-
-function printLog(flag, recv, send) {
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)("packet[" + flag + " " + recv.toString(10).padStart(3,"0") + " " + send.toString(10).padStart(3,"0") + "]");
 }
 
 function setMaster(value) {
@@ -35383,13 +35394,11 @@ startDemoButton.addEventListener('click', () => {
       }
     }
   });
-  xhr.open('GET', 'test.gbc'); // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
+  xhr.open('GET', '/public/test.gbc'); //test.gbc // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
   xhr.send();
 });
 
-
 document.addEventListener('keydown', (ev) => {
-  (0,_logger_js__WEBPACK_IMPORTED_MODULE_1__.mainLog)('pressed: ' + ev.code);
   messageQueue.push({callback: keyHandler, event: ev});
   processNextMessage();
 });
@@ -35511,9 +35520,7 @@ function runGame(rom, multiPlay) {
           scMonitorStartSharedBuffer: scMonitorStartSharedBuffer,
           networkTimingBuffer: networkTimingBuffer,
           smu:mu,
-          orderLock:_logger_js__WEBPACK_IMPORTED_MODULE_1__.orderLock,
-          buffer:_logger_js__WEBPACK_IMPORTED_MODULE_1__.buffer,
-          currentSizeBuffer:_logger_js__WEBPACK_IMPORTED_MODULE_1__.currentSizeBuffer,
+          orderLock:orderLock,
           soundLeftSab:soundLeftSab,
           soundRightSab:soundRightSab,
           fillSab: soundFilledSab,
@@ -35630,9 +35637,6 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   OrderLock: () => (/* binding */ OrderLock)
 /* harmony export */ });
-const locked = 1;
-const unlocked = 0;
-
 /*
    INT_SIZE should be 2 to the power of n
    to use bitwise operation as modular operation.
@@ -35641,508 +35645,21 @@ const INT_SIZE = 32;
 const BIT_MOD = INT_SIZE - 1; 
 
 class OrderLock {
-  /**
-   * Instantiate Mutex.
-   * If opt_sab is provided, the mutex will use it as a backing array.
-   * @param {SharedArrayBuffer} opt_sab Optional SharedArrayBuffer.
-   */
-  /*
-  constructor(opt_sab, opt_queue_sab, opt_front, opt_end, opt_reserved) {
-    this._sab = opt_sab || new SharedArrayBuffer(4);
-    this._mu = new Int32Array(this._sab);
 
-    this._queue_sab = opt_queue_sab || new SharedArrayBuffer(4*(INT_SIZE));
-    this._queue = new Int32Array(this._queue_sab);
-
-    this._front_sab = opt_front || new SharedArrayBuffer(4);
-    this._end_sab = opt_end || new SharedArrayBuffer(4);
-
-    this._front = new Int32Array(this._front_sab);
-    this._end = new Int32Array(this._end_sab);
-
-    this._reserved_sab = opt_reserved || new SharedArrayBuffer(4*(INT_SIZE));
-    this._reserved = new Int32Array(this._reserved_sab);
-    Atomics.store(this._reserved, 0 , -1);
-  }
-  */
-
-  constructor(opt_sab, opt_order, opt_main, opt_worker, opt_dsab, opt_enter_order, opt_queue_sab, opt_front, opt_end, opt_reserved) {
-    this._sab = opt_sab || new SharedArrayBuffer(4);
-    this._mu = new Int32Array(this._sab);
-
+  constructor(opt_order) {
     this._order_buffer = opt_order || new SharedArrayBuffer(4*(INT_SIZE));
     this._order = new Int32Array(this._order_buffer);
     this._order[0] = 1;
-
-    this._main_buffer = opt_main || new SharedArrayBuffer(4*(INT_SIZE));
-    this._main = new Int32Array(this._main_buffer);
-
-    this._worker_buffer = opt_worker || new SharedArrayBuffer(4*(INT_SIZE));
-    this._worker = new Int32Array(this._worker_buffer);
-
-    this._dsab = opt_dsab || new SharedArrayBuffer(4);
-    this._door = new Int32Array(this._dsab);
-
-    this._enter_order_buffer = opt_enter_order || new SharedArrayBuffer(4*(INT_SIZE));
-    this._enter_order = new Int32Array(this._enter_order_buffer);
-    this._enter_order[0] = 1;
-
-    this._queue_sab = opt_queue_sab || new SharedArrayBuffer(4*(INT_SIZE));
-    this._queue = new Int32Array(this._queue_sab);
-
-    this._front_sab = opt_front || new SharedArrayBuffer(4);
-    this._end_sab = opt_end || new SharedArrayBuffer(4);
-
-    this._front = new Int32Array(this._front_sab);
-    this._end = new Int32Array(this._end_sab);
-
-    this._reserved_sab = opt_reserved || new SharedArrayBuffer(4*(INT_SIZE));
-    this._reserved = new Int32Array(this._reserved_sab);
-    this._reserved[0] = -1;
   }
 
-  /**
-   * Instantiate a Mutex connected to the given one.
-   * @param {OrderLock} mu the other Mutex.
-   */
   static connect(mu) {
-    //return new OrderLock(mu._sab, mu._queue_sab, mu._front_sab, mu._end_sab, mu._reserved_sab);
-    return new OrderLock(mu._sab, mu._order_buffer, mu._main_buffer, mu._worker_buffer, mu._dsab, 
-      mu._enter_order_buffer, mu._queue_sab, mu._front_sab, mu._end_sab, mu._reserved_sab);
-  }
-
-
-  //---------------------------------------------------------
-
-  lock() {
-    const enterId = this.getId();
-    for(;;) {
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          // get lock
-          return enterId;
-        }
-        Atomics.wait(this._mu, 0, locked);
-    }
-  }
-
-  spinLock() {
-    const enterId = this.getId();
-    for(;;) {
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          // get lock
-          return enterId;
-        }
-        //Atomics.wait(this._mu, 0, locked);
-    }
+    return new OrderLock(mu._order_buffer);
   }
 
   getId() {
     const enterId = Atomics.add(this._order, 0, 1) % INT_SIZE;
     Atomics.and(this._order, 0, BIT_MOD);
     return enterId;
-  }
-
-  unLock() { 
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.notify(this._mu, 0, 1);
-  }
-  /**
-   *  this._worker[0] is wait flag.
-   */
-  getWaitLock() {
-    console.log("emul [WANT LOCK]");
-    for(;;) {
-      if(Atomics.load(this._main, 0) === 0) {    // is the other reserved?
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      Atomics.store(this._worker, 0, 1);
-      console.log("emul [WAIT     ]", Atomics.load(this._main, 0));
-      Atomics.wait(this._mu, 0, locked);
-    }
-  }
-
-  getWaitSpinLock() {
-    let notWait = true;
-    console.log("     [WANT LOCK]");
-    for(;;) {
-      if(Atomics.load(this._worker, 0) === 0) {    // is the other reserved?
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      if(notWait) {
-        console.log("     [WAIT     ]");
-        Atomics.store(this._main, 0, 1);
-        notWait = false;
-      }
-    }
-  }
-
-  releaseWaitLock() {
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-      throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._worker, 0, 0);
-    Atomics.notify(this._mu, 0, 1)
-  }
-
-  releaseWaitSpinLock() {
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._main, 0, 0);
-    Atomics.notify(this._mu, 0, 1)
-  }
-
-
-  getIncreasingOrderLock() {
-    for(;;) {
-      if(this._worker[0] <= this._main[0]) {    // is reserved?
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      Atomics.store(this._main, 0, Atomics.add(this._order, 0 ,1));
-      Atomics.wait(this._mu, 0, locked);
-    }
-  }
-
-  getIncreasingOrderSpinLock() {
-    let waitId = -1;
-    for(;;) {
-      if(this._worker[0] >= this._main[0]) {    
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      if(waitId < 0) {
-        waitId = Atomics.store(this._worker, 0, Atomics.add(this._order, 0 ,1));
-      }
-    }
-  }
-
-  releaseIncreasingOrderLock() { 
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._worker, 0, Atomics.add(this._order, 0 ,1));
-    Atomics.notify(this._mu, 0, 1)
-  }
-
-  releaseIncreasingOrderSpinLock() { 
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._main, 0, Atomics.add(this._order, 0 ,1));
-    Atomics.notify(this._mu, 0, 1)
-  }
-  
-  /*
-                    notify A, front==end(the last one in the queue), empty
-                                    lock() from emul // newbie intercept
-       A lockAsync(),
-                    
-  */
-  lockQueue() {
-    for(;;) {
-        if(this.isReserved()) {
-          Atomics.wait(this._queue, this.enqueue(), locked);
-        }
-
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          // get lock
-          return;
-        }
-        //Atomics.wait(this._mu, 0, locked);
-        Atomics.wait(this._queue, this.enqueue(), locked);
-        // retry should success. because it is waked up by orderd
-      }
-  }
-
-  lockAsync(waitId) {
-    ////console.log("lockAsync :" + waitId);
-    if(waitId == null) {                // newbie
-        if(this.isReserved()) {         // waiters
-            return this.getWaitAsync();
-        } else {                        // empty
-            return this.getlockAsync();
-        }
-    }
-    
-    if(waitId != null && this.isQualified(waitId)) {
-        console.log("QUALIFED: " + waitId);
-        return this.getlockAsync();
-    } else {
-        throw new Error("error with waitId: " + waitId + " reserved: " + this._reserved[0]);
-    }
-  }
-
-  getWaitAsync() {
-    const waitId = this.enqueue();
-    let waitObj;
-    waitObj = Atomics.waitAsync(this._queue, waitId, locked);
-    if(waitObj.async == false) {
-        this.dequeue();
-    }
-    return {waitObj:waitObj, waitId:waitId};
-  }
-
-  getlockAsync() {
-    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-      return {waitObj:null, waitId:null};
-    }
-    //return Atomics.waitAsync(this._mu, 0, locked);
-    return this.getWaitAsync();
-  }
-
-  /*
-  -----------------------------------------------------------------------
-  */
-
-  lockByOrder() {
-    const enterId = this.getId();
-    this.waitLoop(enterId);
-    let waitId = -1;
-
-    this.doorLock();
-    /*
-        if wait by reserved one, it wakeup once by its waitId
-    */
-    if(this.isReserved()) { // after dequeue
-      //this.waitLoop(enterId);
-      waitId = this.enqueue();
-      this.addEnterOrder();
-
-      this.doorUnLock();
-
-      Atomics.wait(this._queue, waitId, locked);
-
-      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-        //this.addEnterOrder();
-        return;
-      } else {
-        throw new Error("order broken");
-      }
-    }
-    
-    /*
-        empty queue, let's compete
-    */
-    for(;;) {
-      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-        if(waitId < 0) {
-          this.addEnterOrder();
-          this.doorUnLock();
-        }
-        return;
-      }
-
-      if(waitId > -1) {
-        throw new Error("order broken");
-      }
-
-      //this.waitLoop(enterId);
-      waitId = this.enqueue();
-      this.addEnterOrder();
-
-      this.doorUnLock();
-
-      Atomics.wait(this._queue, waitId, locked);
-    }
-  }
-
-  /*
-      emul 과 adapter 간의 진입 순서를 가르기 위함인듯.
-      
-      't2 adapter thread에서 spinlock 사용시(queue 없이) t3 emul thread가 새치기 할 수 있음'
-               t1.gelock
-      t2.wait
-               t1.unlock
-               t3.getLock
-      t2.wait
-      --> 이를 막기 위한 waitLoop
-
-
-      emul 1 개 처리동안 adapter 에서 2 개 요청 들어오는 케이스
-      enterOrder, enterId
-          1         1      t1 call    emul
-          1         2      t2 call    adapter  enterId of t2 = 1 // enterId+1, waitLoop(1 < 2)
-          2         2      t1 getLock                            // enterOrder+1 -> break t2's waitLoop
-          3         2      t2 waitAsync                          // enqueue -> enterOrder+1
-          3         3      t3 call    adapter  enterId of t3 = 2 // enterId+1, pass waitLoop
-          4         3      t3 waitAsync                          // enqueue -> enterOrder+1
-                           t1 unlock
-          4         3      t2 getLock
-
-
-          when add enterOrder? 내 처리 끝나고 후배들 waitLoop 풀어주기 위해, 혹은 뉴비가 pass 할 수 있게 준비.
-          after wait  ?
-          after get lock ?  
-          -> 둘 다
-  */
-  waitLoop(enterId) {
-    while(Atomics.load(this._enter_order, 0) < enterId) { }
-    return;
-  }
-
-  doorLock() {
-    for(;;) {
-        if (Atomics.compareExchange(this._door, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-        Atomics.wait(this._door, 0, locked);
-    }
-  }
-
-  doorSpinLock() {
-    for(;;) {
-        if (Atomics.compareExchange(this._door, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-    }
-  }
-
-  doorUnLock() { 
-    if (Atomics.compareExchange(this._door, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.notify(this._door, 0, 1);
-  }
-
-  addEnterOrder() {
-    Atomics.add(this._enter_order, 0, 1);
-  }
-
-  lockAsyncByOrder() {
-    const enterId = this.getId();
-    this.waitLoop(enterId);
-
-    this.doorSpinLock();
-
-    if(this.isReserved()) {
-      return this.getWaitAsyncByOrder(enterId);
-    } else {
-      return this.getLockAsyncByOrder(enterId);
-    }
-  }
-
-  getWaitAsyncByOrder(enterId) {
-    if(enterId == null) {
-      throw new Error("order broken at fulfilled");
-    }
-    //this.waitLoop(enterId);
-    const waitId = this.enqueue();
-    const waitObj = Atomics.waitAsync(this._queue, waitId, locked);
-    if(waitObj.async == true) {
-      this.addEnterOrder();
-      this.doorUnLock();
-    }
-    return {waitObj:waitObj, waitId:waitId};
-  }
-
-  getLockAsyncByOrder(enterId) {
-    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-      this.addEnterOrder();
-      this.doorUnLock();
-      return {waitObj:null, waitId:null};
-    }
-    return this.getWaitAsyncByOrder(enterId);
-  }
-
-  retryWaitAsyncByOrder(waitId) {
-    const waitObj = Atomics.waitAsync(this._queue, waitId, locked);
-    if(waitObj.async == true) {
-      this.addEnterOrder();
-      this.doorUnLock();
-    }
-    return {waitObj:waitObj, waitId:waitId};
-  }
-
-  getLockAsyncByOrderAndReserved() {
-    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-      return {waitObj:null, waitId:null};
-    }
-    throw new Error("reserved was intercepted!");
-  }
-
-  unlockQueue() { 
-    this.doorSpinLock();
-
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    this.dequeue(); // wakeUp next
-
-    this.doorUnLock();
-  }
-
-  enqueue() {
-    const waitId = Atomics.add(this._end, 0, 1) % INT_SIZE; // modular to this._end later...to avoid race condition.
-    /* 
-        modular this._end here.
-        waitId and thie._end could be different.
-        Because the other thread add to this._end at the bewteen Atomics.add and Atomics.and
-        But, we use waitId instead of double added this._end in this function.
-    */
-    Atomics.and(this._end, 0, BIT_MOD);
-
-    Atomics.store(this._reserved, 0 , 1);
-
-    Atomics.store(this._queue, waitId, locked);
-    console.log("enqueue waitId: " + waitId);
-    return waitId;
-  }
-
-  /*
-        getLockAsyncByOrder
-
-              emul1(lock)
-              adapter1(queued)
-              emul1(unlock), adapter2(enter while emul1 dequeue)
-              
-  */
-  dequeue() {
-
-    if(this.isEmpty()) {
-      Atomics.store(this._reserved, 0 , -1);
-      return;
-    }
-    const wakeUpId = Atomics.add(this._front, 0, 1) % INT_SIZE;
-    console.log("dequeue wakeUpId: " + wakeUpId);
-                                                              // << isEmpty true
-    Atomics.and(this._front, 0, BIT_MOD);
-                                                              // << reserved == -1
-    //Atomics.store(this._reserved, 0, wakeUpId);
-
-    Atomics.store(this._queue, wakeUpId, unlocked);
-    Atomics.notify(this._queue, wakeUpId, 1);
-  }
-
-  isEmpty() {
-    return (this._front[0] % INT_SIZE) == (this._end[0] % INT_SIZE);
-  }
-
-  isFull() {
-    return ((this._end[0] + 1) % INT_SIZE) == (this._front[0] % INT_SIZE);
-  }
-
-  isQualified(waitId) {
-    //console.log("isQualified: "+ this._reserved[0] + " " + waitId);
-    return this._reserved[0] === waitId;
-  }
-
-  isReserved() {
-    const reserved = Atomics.load(this._reserved, 0);
-    if(reserved > -1) {
-      console.log("isReservd: " + reserved);
-      return true;
-    }
-    return false;
-    // return Atomics.load(this._reserved, 0) > -1;
   }
 };
 
@@ -36229,221 +35746,6 @@ class Mutex {
 
 /***/ }),
 
-/***/ "./public/logger.js":
-/*!**************************!*\
-  !*** ./public/logger.js ***!
-  \**************************/
-/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
-
-__webpack_require__.r(__webpack_exports__);
-/* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   buffer: () => (/* binding */ buffer),
-/* harmony export */   currentSizeBuffer: () => (/* binding */ currentSizeBuffer),
-/* harmony export */   mainLog: () => (/* binding */ mainLog),
-/* harmony export */   orderLock: () => (/* binding */ orderLock),
-/* harmony export */   printLogAll: () => (/* binding */ printLogAll)
-/* harmony export */ });
-/* harmony import */ var _js_orderlock_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./js/orderlock.js */ "./public/js/orderlock.js");
-//const { OrderLock } = self;
-//const orderLock = new OrderLock();
-
-const orderLock = new _js_orderlock_js__WEBPACK_IMPORTED_MODULE_0__.OrderLock();
-
-const logs = [];
-
-function mainLog(...args) {
-    //const message = args.join(' ');
-    //console.log(args);
-    
-    //saveLine(args);
-    
-    //getAsyncOrderedLock(saveLine, message);
-}
-
-function printLogAll() {
- console.log("printAll");
- // Later, you can process the logs
- //customLog('Collected Logs:', logs);  
- //const data = JSON.stringify(logs, null, 2); // Convert array to JSON string
- //console.log(data); // Write 
- printAllLines();
- //console.log("       --> ", Atomics.load(currentSizeShared, 0));
-}
-
-const maxSize = 1024 * 1024 * 1000; // 100 MB, Maximum size of the buffer
-const buffer = new SharedArrayBuffer(maxSize);
-const uint8Array = new Uint8Array(buffer);
-
-const currentSizeBuffer = new SharedArrayBuffer(4);
-let currentSizeShared = new Int32Array(currentSizeBuffer); // Track the current size of data written
-
-// Initialize TextEncoder and TextDecoder once
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
-// Function to save a line in the SharedArrayBuffer atomically
-function saveLine(...args) {
-    const enterId = orderLock.spinLock();
-    //console.log("     [GET LOCK]");
-    const line = "[" + enterId + "] " + args.join(' ');
-    let currentSize = Atomics.load(currentSizeShared, 0);
-    const encodedLine = encoder.encode(line + '\n'); // Add newline for separation
-    const lineSize = encodedLine.length;
-
-    // Check if there is enough space in the buffer
-    if (currentSize + lineSize > maxSize) {
-        console.log('Buffer is full. Cannot add more data.');
-        orderLock.unLock();
-        return false; // Indicate that the buffer is full
-    }
-
-    // Store the encoded line in the buffer atomically
-    for (let i = 0; i < lineSize; i++) {
-        Atomics.store(uint8Array, currentSize + i, encodedLine[i]);
-    }
-
-    // Update the current size atomically
-    Atomics.add(new Int32Array(buffer), 0, lineSize); // Assuming the first 4 bytes of the buffer are used for currentSize
-    //currentSize += lineSize; // Update the current size
-    Atomics.add(currentSizeShared, 0, lineSize);
-
-    //orderLock.unlock();
-    orderLock.unLock();
-    //console.log("     [RELEASE LOCK]");
-    return true; // Indicate success
-}
-
-/*
-function getAsyncMainLock(callback, arg1) {
-    let asyncLock = mulog.lockAsync();
-    while(true) {
-      if(asyncLock == null) {
-        callback(arg1);
-        return;
-      } else if(asyncLock.async == false) {
-        asyncLock = mulog.lockAsync();
-      } else if(asyncLock.async == true) {
-        asyncLock.value.then(() => {
-          getAsyncMainLock(callback, arg1);
-        });
-        return;
-      }
-    }
-}
-*/
-
-function getAsyncOrderedLockOld(callback, arg1) {
-    console.log("main A getAsyncOrderedLock");
-
-    let {waitObj, waitId} = orderLock.lockAsync();
-    while(true) {
-      if(waitObj == null) {
-        //console.log("main B [GET LOCK]");
-        callback(arg1);
-        return;
-      } else if(waitObj.async == true) {
-        waitObj.value.then(() => {
-          console.log("fullfiled " + waitId);
-          ({waitObj, waitId} = orderLock.lockAsync(waitId));
-          //console.log("main D " + waitObj + " " + waitId);
-          if(waitObj == null) {
-            console.log("main [GET LOCK]");
-            callback(arg1);
-          } else {
-            throw new Error("error waitObj again");
-          }
-        });
-        console.log("break :" + waitId);
-        return;
-      } else if(waitObj.async == false) {
-        console.log("retry");
-        ({waitObj, waitId} = orderLock.lockAsync());
-      }
-    }
-}
-
-function getAsyncOrderedLock(callback, arg1) {
-  console.log("main A getAsyncOrderedLock");
-
-  let {waitObj, waitId} = orderLock.lockAsyncByOrder();
-  while(true) {
-    if(waitObj == null) {
-      //console.log("main B [GET LOCK]");
-      callback(arg1);
-      return;
-    } else if(waitObj.async == true) {
-      waitObj.value.then(() => {
-        console.log("fullfiled " + waitId);
-        /*
-          what if newbie at lockAsyncByOrder?
-          
-        */
-        ({waitObj, waitId} = orderLock.getLockAsyncByOrder()); 
-        //console.log("main D " + waitObj + " " + waitId);
-        if(waitObj == null) {
-          console.log("main [GET LOCK]");
-          callback(arg1);
-        } else {
-          throw new Error("error waitObj again");
-        }
-      });
-      console.log("break :" + waitId);
-      return;
-    } else if(waitObj.async == false) {
-      console.log("retry");
-      ({waitObj, waitId} = orderLock.retryWaitAsyncByOrder(waitId));
-    }
-  }
-}
-
-const outputLines = [];
-// Function to print all lines from the SharedArrayBuffer
-function saveAllLines() {
-    // Create a new ArrayBuffer to copy the data
-    let currentSize = Atomics.load(currentSizeShared, 0);
-    const tempBuffer = new Uint8Array(currentSize); // Create a new Uint8Array of the current size
-    tempBuffer.set(uint8Array.subarray(0, currentSize)); // Copy data from the shared buffer
-
-    // Decode the copied data
-    const allText = decoder.decode(tempBuffer); // Decode the used portion
-    const lines = allText.split('\n'); // Split by newline
-
-    lines.forEach((line, index) => {
-      if (line) { // Check if line is not empty
-          outputLines.push(`Line ${index + 1}: ${line}`);
-      }
-    });
-}
-
-function printAllLines() {
-  /*
-  outputLines.forEach(line => {
-    console.log(line); // Outputs each line
-  });
-  */
-
-  // Create a new ArrayBuffer to copy the data
-  let currentSize = Atomics.load(currentSizeShared, 0);
-  const tempBuffer = new Uint8Array(currentSize); // Create a new Uint8Array of the current size
-  tempBuffer.set(uint8Array.subarray(0, currentSize)); // Copy data from the shared buffer
-
-  // Decode the copied data
-  const allText = decoder.decode(tempBuffer); // Decode the used portion
-  const lines = allText.split('\n'); // Split by newline
-
-  
-  // Print each line
-  lines.forEach((line, index) => {
-      if (line) { // Check if line is not empty
-          //console.log(`Line ${index + 1}: ${line}`);
-          console.log(line);
-      }
-  });     
-}
-
-
-/***/ }),
-
 /***/ "./public/messenger.js":
 /*!*****************************!*\
   !*** ./public/messenger.js ***!
@@ -36518,7 +35820,6 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-//import { printLogAll } from "./logger.js";
 
  // This imports Bootstrap's JavaScript
  // This imports Bootstrap's CSS
@@ -39848,6 +39149,9 @@ function __disposeResources(env) {
 /******/ 		return module.exports;
 /******/ 	}
 /******/ 	
+/******/ 	// expose the modules object (__webpack_modules__)
+/******/ 	__webpack_require__.m = __webpack_modules__;
+/******/ 	
 /************************************************************************/
 /******/ 	/* webpack/runtime/define property getters */
 /******/ 	(() => {
@@ -39858,6 +39162,15 @@ function __disposeResources(env) {
 /******/ 					Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
 /******/ 				}
 /******/ 			}
+/******/ 		};
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/get javascript chunk filename */
+/******/ 	(() => {
+/******/ 		// This function allow to reference async chunks
+/******/ 		__webpack_require__.u = (chunkId) => {
+/******/ 			// return url for filenames based on template
+/******/ 			return "" + chunkId + ".js";
 /******/ 		};
 /******/ 	})();
 /******/ 	
@@ -39887,6 +39200,55 @@ function __disposeResources(env) {
 /******/ 			}
 /******/ 			Object.defineProperty(exports, '__esModule', { value: true });
 /******/ 		};
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/publicPath */
+/******/ 	(() => {
+/******/ 		var scriptUrl;
+/******/ 		if (__webpack_require__.g.importScripts) scriptUrl = __webpack_require__.g.location + "";
+/******/ 		var document = __webpack_require__.g.document;
+/******/ 		if (!scriptUrl && document) {
+/******/ 			if (document.currentScript && document.currentScript.tagName.toUpperCase() === 'SCRIPT')
+/******/ 				scriptUrl = document.currentScript.src;
+/******/ 			if (!scriptUrl) {
+/******/ 				var scripts = document.getElementsByTagName("script");
+/******/ 				if(scripts.length) {
+/******/ 					var i = scripts.length - 1;
+/******/ 					while (i > -1 && (!scriptUrl || !/^http(s?):/.test(scriptUrl))) scriptUrl = scripts[i--].src;
+/******/ 				}
+/******/ 			}
+/******/ 		}
+/******/ 		// When supporting browsers where an automatic publicPath is not supported you must specify an output.publicPath manually via configuration
+/******/ 		// or pass an empty string ("") and set the __webpack_public_path__ variable from your code to use your own logic.
+/******/ 		if (!scriptUrl) throw new Error("Automatic publicPath is not supported in this browser");
+/******/ 		scriptUrl = scriptUrl.replace(/#.*$/, "").replace(/\?.*$/, "").replace(/\/[^\/]+$/, "/");
+/******/ 		__webpack_require__.p = scriptUrl;
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/jsonp chunk loading */
+/******/ 	(() => {
+/******/ 		__webpack_require__.b = document.baseURI || self.location.href;
+/******/ 		
+/******/ 		// object to store loaded and loading chunks
+/******/ 		// undefined = chunk not loaded, null = chunk preloaded/prefetched
+/******/ 		// [resolve, reject, Promise] = chunk loading, 0 = chunk loaded
+/******/ 		var installedChunks = {
+/******/ 			"rtc": 0
+/******/ 		};
+/******/ 		
+/******/ 		// no chunk on demand loading
+/******/ 		
+/******/ 		// no prefetching
+/******/ 		
+/******/ 		// no preloaded
+/******/ 		
+/******/ 		// no HMR
+/******/ 		
+/******/ 		// no HMR manifest
+/******/ 		
+/******/ 		// no on chunks loaded
+/******/ 		
+/******/ 		// no jsonp function
 /******/ 	})();
 /******/ 	
 /************************************************************************/

@@ -39,44 +39,15 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _gb_display_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./gb/display.js */ "./public/js/gb/display.js");
 /* harmony import */ var _sync_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./sync.js */ "./public/js/sync.js");
 /* harmony import */ var _orderlock_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./orderlock.js */ "./public/js/orderlock.js");
-/*
-importScripts('gb/cartridge.js',
-    'gb/cpu.js',
-    'gb/display.js',
-    'gb/joypad.js',
-    'gb/rtc.js',
-    'gb/serial.js',
-    'gb/sound.js',
-    'gb/timer.js',
-    'sync.js',
-    'orderlock.js',
-  '../dummylogger.js');
-*/
 
 
  // Adjust based on actual exports
  // Adjust based on actual exports
-
-
-//const { Mutex } = self; 
-//const { OrderLock } = self;
 
 let delayGap = 0;
 let timestampLock = 0;
 let mu;
 let orderLock;
-const maxSize = 1024 * 1024 * 1000;
-
-let sharedArray;
-let sharedBuffer;
-//let currentDataSize = 0; // Track the current size of data written
-
-// Initialize TextEncoder and TextDecoder once
-const txtEncoder = new TextEncoder();
-const txtDecoder = new TextDecoder();
-
-let sharedCurrentSizeBuffer;
-let sharedCurrentSize;
 
 let multiPlay = false;
 
@@ -98,37 +69,6 @@ function saveLog(...args) {
   
 }
 
-function saveLogImpl(...args) {
-  const enterId = orderLock.lock();
-  //console.log("emul [GET LOCK]");
-  const line = "[" + enterId + "] " + args.join(' ');
-  
-  let currentSize = Atomics.load(sharedCurrentSize, 0);
-  const encodedLine = txtEncoder.encode(line + '\n'); // Add newline for separation
-  const lineSize = encodedLine.length;
-
-  // Check if there is enough space in the buffer
-  if (currentSize + lineSize > maxSize) {
-      console.log('Buffer is full. Cannot add more data.');
-      orderLock.unLock();
-      return false; // Indicate that the buffer is full
-  }
-
-  // Store the encoded line in the buffer atomically
-  for (let i = 0; i < lineSize; i++) {
-      Atomics.store(sharedArray, currentSize + i, encodedLine[i]);
-  }
-
-  // Update the current size atomically
-  Atomics.add(new Int32Array(sharedBuffer), 0, lineSize); // Assuming the first 4 bytes of the buffer are used for currentSize
-  //currentSize += lineSize; // Update the current size
-  Atomics.add(sharedCurrentSize, 0, lineSize);
-
-  orderLock.unLock();
-  //console.log("emul [RELEASE LOCK]");
-  return true; // Indicate success
-}
-
 self.onmessage = event => {
   const {msg, payload} = event.data;
   switch (msg) {
@@ -141,12 +81,6 @@ self.onmessage = event => {
       timestampLock = new Int32Array(payload.networkTimingBuffer);
   
       mu = _sync_js__WEBPACK_IMPORTED_MODULE_2__.Mutex.connect(payload.smu);
-
-      sharedBuffer = payload.buffer;
-      sharedArray = new Uint8Array(sharedBuffer);
-
-      sharedCurrentSizeBuffer = payload.currentSizeBuffer;
-      sharedCurrentSize = new Int32Array(sharedCurrentSizeBuffer);
 
       orderLock = _orderlock_js__WEBPACK_IMPORTED_MODULE_3__.OrderLock.connect(payload.orderLock);
 
@@ -161,16 +95,6 @@ self.onmessage = event => {
       saveLog("travelTime   : ", travelTime.toFixed(3));
       saveLog("leftDelayTime: ", leftDelayTime.toFixed(3));
 
-      /*
-      if(payload.isNextRecvQ) {
-        saveLog("****0       : nextRecvQ is true");
-        preStart();
-        saveLog("****0       break");
-        return;
-      }
-      */
-
-      
       if(delayGap <= 0) { // repay armotized delay by skipping the wait time
         //console.log("**** 1      : Gap1 is exceed 16.74");
         preStart();
@@ -223,15 +147,16 @@ let running = false;
 
 let past;
 
-let oldUpdateGap = 0;
 let fps = 0;
 let isInitUpdate = true;
 
-let pastGap = 0;
 
 let timestamp = 0;
-let mainLock;
 let tsIdx = 0;
+
+let setFirstNext = false;
+let firstNext = 0;
+
 
 function preStart() {
   self.postMessage({
@@ -369,274 +294,9 @@ function noDelayUpdate() {
     });
 }
 
-
-function oldUpdate() {
-  const startTime = performance.now();
-    const gap0 = startTime - past;
-    saveLog("%c [GAPx]    e}_ {s     e}   = " + pastGap.toFixed(3), "background:blue; color:white");
-    saveLog("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white");
-    if(pastGap > 0) {
-        saveLog("%c [GAPr]    e} _{s     e}   = " + (gap0-pastGap).toFixed(3), "background:green; color:white");
-    } else {
-        saveLog("%c [GAPr]    e} _{s     e}   = " + (gap0).toFixed(3), "background:green; color:white");
-    }
-
-    if (paused || !running) {
-        return;
-    }
-    if (gb.cartridge.hasRTC) {
-        gb.cartridge.rtc.updateTime();
-    }
-    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-        try {
-            cycles += gb.cycle();
-        } catch (error) {
-            console.error(error);
-            running = false;
-            return;
-        }
-    }
-    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-
-    fps++;
-
-    const current = performance.now();
-    const gap1 = current-startTime;
-    let nextGap;
-
-    
-    if(isInitUpdate) {
-      isInitUpdate = false;
-      next = current;
-      nextGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval-gap1;
-    } else {
-      next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
-      nextGap = next - current;
-    }
-    
-
-    // origin
-    //next += Display.frameInterval; //next += 16.74 or 8.37
-    //nextGap = next - current;
-    //
-
-
-    saveLog("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:orange; color:black");
-    saveLog("%c [GAP4]        {s     e}___= " + nextGap.toFixed(3), "color:blue");
-
-    past = current;
-
-    pastGap = nextGap;
-    
-    setTimeout(oldUpdate, nextGap);
-}
-
-let lastTime;
-function paint(callTime) {
-  saveLog("%c [GAP$] {s__}___{e  }   = " + (callTime - lastTime).toFixed(3), "background:green; color:white");
-  lastTime = callTime;
-
-  /*
-  const startTime = performance.now();
-  const gap0 = startTime - past;
-  saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
-  */
-  
-
-  if (paused || !running) {
-    return;
-  }
-  if (gb.cartridge.hasRTC) {
-    saveLog("%c RTC " , "background:black; color:white");
-    gb.cartridge.rtc.updateTime();
-  }
-
-  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-    try {
-      cycles += gb.cycle();
-    } catch (error) {
-      console.error(error);
-      running = false;
-      return;
-    }
-  }
-  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-
-  fps++;
-
-  /*
-  const current = performance.now();
-  const gap1 = current - startTime;
-  past = current;
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  */
-  
-
-  requestAnimationFrame(paint);
-}
-
-
-function updateOG() {
-  const startTime = performance.now();
-  const gap0 = startTime - past;
-  saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
-
-  if (paused || !running) {
-    return;
-  }
-  if (gb.cartridge.hasRTC) {
-    gb.cartridge.rtc.updateTime();
-  }
-
-  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-    try {
-      cycles += gb.cycle();
-    } catch (error) {
-      console.error(error);
-      running = false;
-      return;
-    }
-  }
-  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-
-  fps++;
-
-
-
-
-
-
-  /**
-         'loadAndStart'   'setTimeout'
-      next  : now,         now+16.74,         // ideal lap time
-      before: now,   now+x            now+y,
-
-
-     =========|=========|
-      (     )   (    )
-            <--       <--
-
-      updateGap = next - current
-     
-   */
-  /*
-  const current = performance.now();
-  const gap1 = current-startTime;
-  let updateGap;
-  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정
-    isInitUpdate = false;
-    next = current;
-    updateGap = Display.frameInterval-gap1;
-  } else {
-    next += Display.frameInterval; // +16.74ms
-    updateGap = next - current;
-  }
-  past = current;
-
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  saveLog("%c [GAPu] s}    {    e}<--= " + updateGap.toFixed(3), "background:green; color:white");
-  
-  setTimeout(() => update(), updateGap);
-*/
-
-
-
-  /*
-   const current = performance.now();
-   const setTimeoutGap = current-past;
-   past = current;
-   const updateGap = Display.frameInterval - setTimeoutGap;
-
-   saveLog("%c [GAP1]        {s-----e}   = " + (current-startTime).toFixed(3), "background:orange; color:black");
-   saveLog("%c [GAP2] {  s}--{------e}   = "+ setTimeoutGap.toFixed(3), "background:yellow; color:black");
-   saveLog("%c [GAP3} {  s--16.74---e}   = "+ updateGap.toFixed(3), "background:green; color:white");
-   */
-
-
-
-/**
- *   (       )                (      )
- * 
- *           _________.........______xxxxx
- * 
- *           <------->                       oldUpdateGap     
- *           <----------------->             gap0
- *                             <----->       gap1
- *           <----------------------->       gap2
- *                                   <--->   updateGap
- *                    <------->              realDelay
- */
-
-  /**
-   * 
-   *                          if oldUpdateGap <= gap0
-   *                               (    )    (     )
-   *                                   <-->....
-   *                                   <------>
-   *                                updateGap = 16.74 - (gap0 - oldUpdateGap) - gap1;
-   *                          else
-   *                               (    )    (     )
-   *                                   <-------->
-   *                                   <------>
-   *                                updateGap = 16.74 -         0             - gap1;
-   * 
-   * 
-   *    if oldUpdateGap <= 0 (already over 16.74), then take 4ms gap0 as default delay of mine.
-   * 
-   */
-  
-  const current = performance.now();
-  const gap1 = current - startTime;
-  const gap2 = current - past;
-  const realDelay = oldUpdateGap > gap0 ? 0 : gap0 - oldUpdateGap;
-  
-  let updateGap;
-  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정
-    isInitUpdate = false;
-    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
-  } else {
-    //updateGap = Display.frameInterval - gap2 + oldUpdateGap;  //Display.frameInterval - (gap0 - oldUpdateGap) - gap1;
-    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - realDelay - gap1;
-  }
-
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  //saveLog("%c [GAP2] s}____{____e}   = " + gap2.toFixed(3), "background:yellow; color:black");
-  saveLog("%c [GAP2] s}  __{    e}   = " + realDelay.toFixed(3), "background:yellow; color:black");
-  saveLog("%c [GAP3] s}__  {    e}   = " + oldUpdateGap.toFixed(3), "background:green; color:white");
-  saveLog("%c [GAP4] s}    {s   e}__ = " + updateGap.toFixed(3), "background:blue; color:white");
-
-  if(updateGap < 0) {
-    updateGap = 0;
-  }
-  oldUpdateGap = updateGap;
-  past = current;
-
-
-  setTimeout(() => update(), updateGap);
-  
-
-
-  /** 
-      setInterval
-  */
-  /*
-  const current = performance.now();
-  const gap1 = current - startTime;
-  past = current;
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  */
-  
-  
-}
-
 let printOld;
-
 function printFps() {
   const current = performance.now();
-
- /*
-  save the int value to setIntGap
- */
   const setIntGap = (current - printOld).toFixed(0);
   const letter = fps + " " + _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps + " " + setIntGap;
   let isSame = true;
@@ -687,14 +347,7 @@ function loadAndStart(payload) {
 
     next = past;
 
-    //update();
-    //oldUpdate();
-
     noDelayUpdate();
-
-    //setInterval(() => update(), Display.frameInterval);
-
-    //requestAnimationFrame(paint);
 
     printOld = past;
     fpsInterval = setInterval(() => printFps(), 1000);
@@ -703,79 +356,37 @@ function loadAndStart(payload) {
   }
 }
 
-let setFirstNext = false;
-let firstNext = 0;
-
-function update() {
-  const startTime = performance.now();
-
-  if (paused || !running) {
-      return;
-  }
-  if (gb.cartridge.hasRTC) {
-      gb.cartridge.rtc.updateTime();
-  }
-  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-      try {
-          cycles += gb.cycle();
-      } catch (error) {
-          console.error(error);
-          running = false;
-          return;
-      }
-  }
-  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-  const current = performance.now();
-  
-  fps++;
-
-  if(fps > 59) {
-    isInitUpdate = true; // reset delay
-  }
-  
-  const gap1 = current-startTime;
+/**
+ *   (       )                (      )
+ * 
+ *           _________.........______xxxxx
+ * 
+ *           <------->                       oldUpdateGap     
+ *           <----------------->             gap0
+ *                             <----->       gap1
+ *           <----------------------->       gap2
+ *                                   <--->   updateGap
+ *                    <------->              realDelay
+ */
 
   /**
-   *   never init
+   * 
+   *                          if oldUpdateGap <= gap0
+   *                               (    )    (     )
+   *                                   <-->....
+   *                                   <------>
+   *                                updateGap = 16.74 - (gap0 - oldUpdateGap) - gap1;
+   *                          else
+   *                               (    )    (     )
+   *                                   <-------->
+   *                                   <------>
+   *                                updateGap = 16.74 -         0             - gap1;
+   * 
+   * 
+   *    if oldUpdateGap <= 0 (already over 16.74), then take 4ms gap0 as default delay of mine.
    * 
    */
-  isInitUpdate = false;
-
   
-  if(isInitUpdate) {
-    console.log("init");
-    isInitUpdate = false;
-
-    next = current;
-    delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
-  } else{
-    next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
-    delayGap = next - current;
-  }
-  
-
-  /*
-  if(!setFirstNext) {
-    setFirstNext = true;
-    firstNext = current;
-    next = current;
-    delayGap = Display.frameInterval - gap1;
-    isInitUpdate = false;
-    setTimeout(update, delayGap);
-    return;
-  }
-
-  if(isInitUpdate) {
-    console.log("init");
-    isInitUpdate = false;
-    next = Math.floor((current-firstNext)/Display.frameInterval)*Display.frameInterval + firstNext;
-  }
-  
-  next += Display.frameInterval; //next += 16.74 or 8.37
-  delayGap = next - current;
-  */
-  setTimeout(update, delayGap);
-}
 
     /**
      *                                        next=current
@@ -4531,9 +4142,6 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   OrderLock: () => (/* binding */ OrderLock)
 /* harmony export */ });
-const locked = 1;
-const unlocked = 0;
-
 /*
    INT_SIZE should be 2 to the power of n
    to use bitwise operation as modular operation.
@@ -4542,508 +4150,21 @@ const INT_SIZE = 32;
 const BIT_MOD = INT_SIZE - 1; 
 
 class OrderLock {
-  /**
-   * Instantiate Mutex.
-   * If opt_sab is provided, the mutex will use it as a backing array.
-   * @param {SharedArrayBuffer} opt_sab Optional SharedArrayBuffer.
-   */
-  /*
-  constructor(opt_sab, opt_queue_sab, opt_front, opt_end, opt_reserved) {
-    this._sab = opt_sab || new SharedArrayBuffer(4);
-    this._mu = new Int32Array(this._sab);
 
-    this._queue_sab = opt_queue_sab || new SharedArrayBuffer(4*(INT_SIZE));
-    this._queue = new Int32Array(this._queue_sab);
-
-    this._front_sab = opt_front || new SharedArrayBuffer(4);
-    this._end_sab = opt_end || new SharedArrayBuffer(4);
-
-    this._front = new Int32Array(this._front_sab);
-    this._end = new Int32Array(this._end_sab);
-
-    this._reserved_sab = opt_reserved || new SharedArrayBuffer(4*(INT_SIZE));
-    this._reserved = new Int32Array(this._reserved_sab);
-    Atomics.store(this._reserved, 0 , -1);
-  }
-  */
-
-  constructor(opt_sab, opt_order, opt_main, opt_worker, opt_dsab, opt_enter_order, opt_queue_sab, opt_front, opt_end, opt_reserved) {
-    this._sab = opt_sab || new SharedArrayBuffer(4);
-    this._mu = new Int32Array(this._sab);
-
+  constructor(opt_order) {
     this._order_buffer = opt_order || new SharedArrayBuffer(4*(INT_SIZE));
     this._order = new Int32Array(this._order_buffer);
     this._order[0] = 1;
-
-    this._main_buffer = opt_main || new SharedArrayBuffer(4*(INT_SIZE));
-    this._main = new Int32Array(this._main_buffer);
-
-    this._worker_buffer = opt_worker || new SharedArrayBuffer(4*(INT_SIZE));
-    this._worker = new Int32Array(this._worker_buffer);
-
-    this._dsab = opt_dsab || new SharedArrayBuffer(4);
-    this._door = new Int32Array(this._dsab);
-
-    this._enter_order_buffer = opt_enter_order || new SharedArrayBuffer(4*(INT_SIZE));
-    this._enter_order = new Int32Array(this._enter_order_buffer);
-    this._enter_order[0] = 1;
-
-    this._queue_sab = opt_queue_sab || new SharedArrayBuffer(4*(INT_SIZE));
-    this._queue = new Int32Array(this._queue_sab);
-
-    this._front_sab = opt_front || new SharedArrayBuffer(4);
-    this._end_sab = opt_end || new SharedArrayBuffer(4);
-
-    this._front = new Int32Array(this._front_sab);
-    this._end = new Int32Array(this._end_sab);
-
-    this._reserved_sab = opt_reserved || new SharedArrayBuffer(4*(INT_SIZE));
-    this._reserved = new Int32Array(this._reserved_sab);
-    this._reserved[0] = -1;
   }
 
-  /**
-   * Instantiate a Mutex connected to the given one.
-   * @param {OrderLock} mu the other Mutex.
-   */
   static connect(mu) {
-    //return new OrderLock(mu._sab, mu._queue_sab, mu._front_sab, mu._end_sab, mu._reserved_sab);
-    return new OrderLock(mu._sab, mu._order_buffer, mu._main_buffer, mu._worker_buffer, mu._dsab, 
-      mu._enter_order_buffer, mu._queue_sab, mu._front_sab, mu._end_sab, mu._reserved_sab);
-  }
-
-
-  //---------------------------------------------------------
-
-  lock() {
-    const enterId = this.getId();
-    for(;;) {
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          // get lock
-          return enterId;
-        }
-        Atomics.wait(this._mu, 0, locked);
-    }
-  }
-
-  spinLock() {
-    const enterId = this.getId();
-    for(;;) {
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          // get lock
-          return enterId;
-        }
-        //Atomics.wait(this._mu, 0, locked);
-    }
+    return new OrderLock(mu._order_buffer);
   }
 
   getId() {
     const enterId = Atomics.add(this._order, 0, 1) % INT_SIZE;
     Atomics.and(this._order, 0, BIT_MOD);
     return enterId;
-  }
-
-  unLock() { 
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.notify(this._mu, 0, 1);
-  }
-  /**
-   *  this._worker[0] is wait flag.
-   */
-  getWaitLock() {
-    console.log("emul [WANT LOCK]");
-    for(;;) {
-      if(Atomics.load(this._main, 0) === 0) {    // is the other reserved?
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      Atomics.store(this._worker, 0, 1);
-      console.log("emul [WAIT     ]", Atomics.load(this._main, 0));
-      Atomics.wait(this._mu, 0, locked);
-    }
-  }
-
-  getWaitSpinLock() {
-    let notWait = true;
-    console.log("     [WANT LOCK]");
-    for(;;) {
-      if(Atomics.load(this._worker, 0) === 0) {    // is the other reserved?
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      if(notWait) {
-        console.log("     [WAIT     ]");
-        Atomics.store(this._main, 0, 1);
-        notWait = false;
-      }
-    }
-  }
-
-  releaseWaitLock() {
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-      throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._worker, 0, 0);
-    Atomics.notify(this._mu, 0, 1)
-  }
-
-  releaseWaitSpinLock() {
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._main, 0, 0);
-    Atomics.notify(this._mu, 0, 1)
-  }
-
-
-  getIncreasingOrderLock() {
-    for(;;) {
-      if(this._worker[0] <= this._main[0]) {    // is reserved?
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      Atomics.store(this._main, 0, Atomics.add(this._order, 0 ,1));
-      Atomics.wait(this._mu, 0, locked);
-    }
-  }
-
-  getIncreasingOrderSpinLock() {
-    let waitId = -1;
-    for(;;) {
-      if(this._worker[0] >= this._main[0]) {    
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      if(waitId < 0) {
-        waitId = Atomics.store(this._worker, 0, Atomics.add(this._order, 0 ,1));
-      }
-    }
-  }
-
-  releaseIncreasingOrderLock() { 
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._worker, 0, Atomics.add(this._order, 0 ,1));
-    Atomics.notify(this._mu, 0, 1)
-  }
-
-  releaseIncreasingOrderSpinLock() { 
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._main, 0, Atomics.add(this._order, 0 ,1));
-    Atomics.notify(this._mu, 0, 1)
-  }
-  
-  /*
-                    notify A, front==end(the last one in the queue), empty
-                                    lock() from emul // newbie intercept
-       A lockAsync(),
-                    
-  */
-  lockQueue() {
-    for(;;) {
-        if(this.isReserved()) {
-          Atomics.wait(this._queue, this.enqueue(), locked);
-        }
-
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          // get lock
-          return;
-        }
-        //Atomics.wait(this._mu, 0, locked);
-        Atomics.wait(this._queue, this.enqueue(), locked);
-        // retry should success. because it is waked up by orderd
-      }
-  }
-
-  lockAsync(waitId) {
-    ////console.log("lockAsync :" + waitId);
-    if(waitId == null) {                // newbie
-        if(this.isReserved()) {         // waiters
-            return this.getWaitAsync();
-        } else {                        // empty
-            return this.getlockAsync();
-        }
-    }
-    
-    if(waitId != null && this.isQualified(waitId)) {
-        console.log("QUALIFED: " + waitId);
-        return this.getlockAsync();
-    } else {
-        throw new Error("error with waitId: " + waitId + " reserved: " + this._reserved[0]);
-    }
-  }
-
-  getWaitAsync() {
-    const waitId = this.enqueue();
-    let waitObj;
-    waitObj = Atomics.waitAsync(this._queue, waitId, locked);
-    if(waitObj.async == false) {
-        this.dequeue();
-    }
-    return {waitObj:waitObj, waitId:waitId};
-  }
-
-  getlockAsync() {
-    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-      return {waitObj:null, waitId:null};
-    }
-    //return Atomics.waitAsync(this._mu, 0, locked);
-    return this.getWaitAsync();
-  }
-
-  /*
-  -----------------------------------------------------------------------
-  */
-
-  lockByOrder() {
-    const enterId = this.getId();
-    this.waitLoop(enterId);
-    let waitId = -1;
-
-    this.doorLock();
-    /*
-        if wait by reserved one, it wakeup once by its waitId
-    */
-    if(this.isReserved()) { // after dequeue
-      //this.waitLoop(enterId);
-      waitId = this.enqueue();
-      this.addEnterOrder();
-
-      this.doorUnLock();
-
-      Atomics.wait(this._queue, waitId, locked);
-
-      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-        //this.addEnterOrder();
-        return;
-      } else {
-        throw new Error("order broken");
-      }
-    }
-    
-    /*
-        empty queue, let's compete
-    */
-    for(;;) {
-      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-        if(waitId < 0) {
-          this.addEnterOrder();
-          this.doorUnLock();
-        }
-        return;
-      }
-
-      if(waitId > -1) {
-        throw new Error("order broken");
-      }
-
-      //this.waitLoop(enterId);
-      waitId = this.enqueue();
-      this.addEnterOrder();
-
-      this.doorUnLock();
-
-      Atomics.wait(this._queue, waitId, locked);
-    }
-  }
-
-  /*
-      emul 과 adapter 간의 진입 순서를 가르기 위함인듯.
-      
-      't2 adapter thread에서 spinlock 사용시(queue 없이) t3 emul thread가 새치기 할 수 있음'
-               t1.gelock
-      t2.wait
-               t1.unlock
-               t3.getLock
-      t2.wait
-      --> 이를 막기 위한 waitLoop
-
-
-      emul 1 개 처리동안 adapter 에서 2 개 요청 들어오는 케이스
-      enterOrder, enterId
-          1         1      t1 call    emul
-          1         2      t2 call    adapter  enterId of t2 = 1 // enterId+1, waitLoop(1 < 2)
-          2         2      t1 getLock                            // enterOrder+1 -> break t2's waitLoop
-          3         2      t2 waitAsync                          // enqueue -> enterOrder+1
-          3         3      t3 call    adapter  enterId of t3 = 2 // enterId+1, pass waitLoop
-          4         3      t3 waitAsync                          // enqueue -> enterOrder+1
-                           t1 unlock
-          4         3      t2 getLock
-
-
-          when add enterOrder? 내 처리 끝나고 후배들 waitLoop 풀어주기 위해, 혹은 뉴비가 pass 할 수 있게 준비.
-          after wait  ?
-          after get lock ?  
-          -> 둘 다
-  */
-  waitLoop(enterId) {
-    while(Atomics.load(this._enter_order, 0) < enterId) { }
-    return;
-  }
-
-  doorLock() {
-    for(;;) {
-        if (Atomics.compareExchange(this._door, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-        Atomics.wait(this._door, 0, locked);
-    }
-  }
-
-  doorSpinLock() {
-    for(;;) {
-        if (Atomics.compareExchange(this._door, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-    }
-  }
-
-  doorUnLock() { 
-    if (Atomics.compareExchange(this._door, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.notify(this._door, 0, 1);
-  }
-
-  addEnterOrder() {
-    Atomics.add(this._enter_order, 0, 1);
-  }
-
-  lockAsyncByOrder() {
-    const enterId = this.getId();
-    this.waitLoop(enterId);
-
-    this.doorSpinLock();
-
-    if(this.isReserved()) {
-      return this.getWaitAsyncByOrder(enterId);
-    } else {
-      return this.getLockAsyncByOrder(enterId);
-    }
-  }
-
-  getWaitAsyncByOrder(enterId) {
-    if(enterId == null) {
-      throw new Error("order broken at fulfilled");
-    }
-    //this.waitLoop(enterId);
-    const waitId = this.enqueue();
-    const waitObj = Atomics.waitAsync(this._queue, waitId, locked);
-    if(waitObj.async == true) {
-      this.addEnterOrder();
-      this.doorUnLock();
-    }
-    return {waitObj:waitObj, waitId:waitId};
-  }
-
-  getLockAsyncByOrder(enterId) {
-    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-      this.addEnterOrder();
-      this.doorUnLock();
-      return {waitObj:null, waitId:null};
-    }
-    return this.getWaitAsyncByOrder(enterId);
-  }
-
-  retryWaitAsyncByOrder(waitId) {
-    const waitObj = Atomics.waitAsync(this._queue, waitId, locked);
-    if(waitObj.async == true) {
-      this.addEnterOrder();
-      this.doorUnLock();
-    }
-    return {waitObj:waitObj, waitId:waitId};
-  }
-
-  getLockAsyncByOrderAndReserved() {
-    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-      return {waitObj:null, waitId:null};
-    }
-    throw new Error("reserved was intercepted!");
-  }
-
-  unlockQueue() { 
-    this.doorSpinLock();
-
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    this.dequeue(); // wakeUp next
-
-    this.doorUnLock();
-  }
-
-  enqueue() {
-    const waitId = Atomics.add(this._end, 0, 1) % INT_SIZE; // modular to this._end later...to avoid race condition.
-    /* 
-        modular this._end here.
-        waitId and thie._end could be different.
-        Because the other thread add to this._end at the bewteen Atomics.add and Atomics.and
-        But, we use waitId instead of double added this._end in this function.
-    */
-    Atomics.and(this._end, 0, BIT_MOD);
-
-    Atomics.store(this._reserved, 0 , 1);
-
-    Atomics.store(this._queue, waitId, locked);
-    console.log("enqueue waitId: " + waitId);
-    return waitId;
-  }
-
-  /*
-        getLockAsyncByOrder
-
-              emul1(lock)
-              adapter1(queued)
-              emul1(unlock), adapter2(enter while emul1 dequeue)
-              
-  */
-  dequeue() {
-
-    if(this.isEmpty()) {
-      Atomics.store(this._reserved, 0 , -1);
-      return;
-    }
-    const wakeUpId = Atomics.add(this._front, 0, 1) % INT_SIZE;
-    console.log("dequeue wakeUpId: " + wakeUpId);
-                                                              // << isEmpty true
-    Atomics.and(this._front, 0, BIT_MOD);
-                                                              // << reserved == -1
-    //Atomics.store(this._reserved, 0, wakeUpId);
-
-    Atomics.store(this._queue, wakeUpId, unlocked);
-    Atomics.notify(this._queue, wakeUpId, 1);
-  }
-
-  isEmpty() {
-    return (this._front[0] % INT_SIZE) == (this._end[0] % INT_SIZE);
-  }
-
-  isFull() {
-    return ((this._end[0] + 1) % INT_SIZE) == (this._front[0] % INT_SIZE);
-  }
-
-  isQualified(waitId) {
-    //console.log("isQualified: "+ this._reserved[0] + " " + waitId);
-    return this._reserved[0] === waitId;
-  }
-
-  isReserved() {
-    const reserved = Atomics.load(this._reserved, 0);
-    if(reserved > -1) {
-      console.log("isReservd: " + reserved);
-      return true;
-    }
-    return false;
-    // return Atomics.load(this._reserved, 0) > -1;
   }
 };
 
