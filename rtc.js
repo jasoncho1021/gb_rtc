@@ -35748,6 +35748,9 @@ document.getElementById('saveFileInput').addEventListener('change', (event) => {
       ramVal = data.ram; // Extract ram data
       rtcVal = data.rtc; // Extract rtc data
       console.log("saveFile is loaded");
+
+      // Set the file name in HTML
+      document.getElementById('fileNameDisplay').textContent = file.name; // Update the file name display
   };
   reader.readAsText(file); // Read the file as text
 });
