@@ -35179,7 +35179,6 @@ function keyHandler(ev) {
   }
 }
 
-/*
 function mouseHandler(ev) {
   const childDiv = ev.target.closest('.childDiv'); // Replace '.childDiv' with your child div class
   let keyNumber;
@@ -35191,6 +35190,15 @@ function mouseHandler(ev) {
 
   switch (ev.type) {
     case 'touchstart':
+      if(keyNumber == 6) {
+        keyBuffer[7] = false;
+      } else if(keyNumber == 7) {
+        keyBuffer[6] = false;
+      } else if(keyNumber == 4) {
+        keyBuffer[5] = false;
+      } else if(keyNumber == 5) {
+        keyBuffer[4] = false;
+      }
       keyBuffer[keyNumber] = true;
       //saveMainLog("mouseDown: " + keyNumber);
       break;
@@ -35211,7 +35219,6 @@ parentDiv.addEventListener('touchend', (ev) => {
   messageQueue.push({callback: mouseHandler, event: ev});
   processNextMessage();
 });
-*/
 
 const multiPlayCheckBox = document.querySelector('#multiPlayCheckBox');
 let gameData;
@@ -35321,6 +35328,9 @@ document.getElementById('saveFileInput').addEventListener('change', (event) => {
       ramVal = data.ram; // Extract ram data
       rtcVal = data.rtc; // Extract rtc data
       console.log("saveFile is loaded");
+
+      // Set the file name in HTML
+      document.getElementById('fileNameDisplay').textContent = file.name; // Update the file name display
   };
   reader.readAsText(file); // Read the file as text
 });
