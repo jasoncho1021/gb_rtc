@@ -51,12 +51,15 @@ let orderLock;
 
 let multiPlay = false;
 
+let runningState;
+
 function saveEmulLog(...args) {
   //saveLogImpl(...args);
   //console.log(args.join(' '));
   const message = args.join(' ');
   const enterId = orderLock.getId();
-  const line = "[    ] : " + enterId + " $ " + message;
+  const paddedEnterId = enterId.toString().padStart(2, ' ');
+  const line = "[    ] : " + paddedEnterId + " $ " + message;
 
   self.postMessage({
     msg: 'log',
@@ -73,6 +76,8 @@ self.onmessage = event => {
   const {msg, payload} = event.data;
   switch (msg) {
     case 'init':
+      runningState = new Int32Array(payload.runningSab);
+
       multiPlay = payload.multiPlay;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas = payload.canvas;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
@@ -87,57 +92,116 @@ self.onmessage = event => {
       loadAndStart(payload);
       break;
     case 'restart':
-      const current = performance.now();
-      const travelTime = current-past;
-      const leftDelayTime = delayGap - travelTime;
-
-      saveLog("delayGap     : ", delayGap.toFixed(3));
-      saveLog("travelTime   : ", travelTime.toFixed(3));
-      saveLog("leftDelayTime: ", leftDelayTime.toFixed(3));
-
-      if(delayGap <= 0) { // repay armotized delay by skipping the wait time
-        //console.log("**** 1      : Gap1 is exceed 16.74");
-        preStart();
-        saveLog("**** 1      break");
-        return;
-      }      
-      
-      if(leftDelayTime <= 0) { // repay armotized delay by skipping the wait time
-        //console.log("****  2     : travel Time used all delayGap");
-        preStart();
-        saveLog("****  2     break");
-        return;
-      }
-
-      
-      if(leftDelayTime > 4) {
-        //console.log("****   3    : more than 4ms call SetTimeout ");
-        setTimeout(() =>  preStart(), leftDelayTime);
-        saveLog("****   3    break");
-        return;
-      } 
-
-      
-      //console.log("****    4   : left delay is less than and equal four. " + leftDelayTime.toFixed(3));
-      preStart();
-      saveLog("****    4   break");
-      
-
-     //setTimeout(() =>  preStart(), leftDelayTime);
-     //setTimeout(() =>  preStart(), delayGap);
+      restart();
+      //restartUpdate();
       return;
     case 'start':
       noDelayUpdate();
       return;
     case 'stop':
-      running = false;
+      //running = false;
+      Atomics.store(runningState, 0, 0);
       clearInterval(fpsInterval);
       return;
+    case 'save':
+      gb.cartridge.save();
+      return;
+    case 'rtc':
+      gb.cartridge.setRtc(payload);
+      playGame();
+      return;
+    case 'ram':
+      gb.cartridge.setRam(payload);
+      if(!gb.cartridge.doesHaveRtc()) {
+        playGame();
+      }
+      return;
     default:
-      //saveLog(event);
       console.log(event);
   }
 };
+
+function restartUpdate() {
+  const current = performance.now();
+  const travelTime = current-past;
+  const leftDelayTime = delayGap - travelTime;
+
+  saveLog("delayGap     : ", delayGap.toFixed(3));
+  saveLog("travelTime   : ", travelTime.toFixed(3));
+  saveLog("leftDelayTime: ", leftDelayTime.toFixed(3));
+
+  if(delayGap <= 0) { // repay armotized delay by skipping the wait time
+    //saveEmulLog("**** 1      : Gap1 is exceed 16.74, delayGap = " + delayGap.toFixed(3));
+    update();
+    //saveLog("**** 1      break");
+    return;
+  }      
+  
+  if(leftDelayTime <= 0) { // repay armotized delay by skipping the wait time
+    //saveEmulLog("****  2     : travel Time used all delayGap, leftDelayTime = " + leftDelayTime.toFixed(3));
+    update();
+    //saveLog("****  2     break");
+    return;
+  }
+
+  
+  if(leftDelayTime > 4) {
+    //saveEmulLog("****   3    : more than 4ms call SetTimeout, leftDelayTime = " + leftDelayTime.toFixed(3));
+    setTimeout(() => update(), leftDelayTime);
+    //saveLog("****   3    break");
+    return;
+  } 
+
+  
+  //saveEmulLog("****    4   : left delay is less than and equal four, leftDelayTime = " + leftDelayTime.toFixed(3));
+  update();
+  //saveLog("****    4   break");
+  
+
+  //setTimeout(() =>  preStart(), leftDelayTime);
+  //setTimeout(() =>  preStart(), delayGap);
+}
+
+function restart() {
+  const current = performance.now();
+  const travelTime = current-past;
+  const leftDelayTime = delayGap - travelTime;
+
+  saveLog("delayGap     : ", delayGap.toFixed(3));
+  saveLog("travelTime   : ", travelTime.toFixed(3));
+  saveLog("leftDelayTime: ", leftDelayTime.toFixed(3));
+
+  if(delayGap <= 0) { // repay armotized delay by skipping the wait time
+    //console.log("**** 1      : Gap1 is exceed 16.74");
+    preStart();
+    saveLog("**** 1      break");
+    return;
+  }      
+  
+  if(leftDelayTime <= 0) { // repay armotized delay by skipping the wait time
+    //console.log("****  2     : travel Time used all delayGap");
+    preStart();
+    saveLog("****  2     break");
+    return;
+  }
+
+  
+  if(leftDelayTime > 4) {
+    //console.log("****   3    : more than 4ms call SetTimeout ");
+    setTimeout(() =>  preStart(), leftDelayTime);
+    saveLog("****   3    break");
+    return;
+  } 
+
+  
+  //console.log("****    4   : left delay is less than and equal four. " + leftDelayTime.toFixed(3));
+  preStart();
+  saveLog("****    4   break");
+  
+
+  //setTimeout(() =>  preStart(), leftDelayTime);
+  //setTimeout(() =>  preStart(), delayGap);
+}
 
 let gb;
 let cycles;
@@ -167,10 +231,135 @@ function preStart() {
 }
 
 let cpuCycles = 0;
-const TIMESTAMP_COUNT_PER_FRAME = 1;
+const TIMESTAMP_COUNT_PER_FRAME = 1; // 0.5  1 ts per 2 update
 const PERIOD = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame/TIMESTAMP_COUNT_PER_FRAME;
 
 function noDelayUpdate() {
+  const startTime = performance.now();
+  _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime = startTime;
+  const gap0 = startTime - past;
+  //saveLog("start time: ", startTime.toFixed(3));
+  
+  //console.log("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white")
+  saveEmulLog("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
+
+
+    if (paused || (Atomics.load(runningState, 0) == 0)) {//!running) {
+        return;
+    }
+    if (gb.cartridge.hasRTC) {
+        //console.log("rtc");
+        gb.cartridge.rtc.updateTime();
+    }
+
+    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
+        try {
+
+            cpuCycles = gb.cycle();
+            cycles += cpuCycles;
+            
+            /*
+              [TODO]
+              if the user try to start 1p,
+              this logic should be skipped
+            */
+            if(multiPlay) {
+              timestamp += cpuCycles;
+              if(timestamp >= PERIOD) {
+                timestamp = timestamp - PERIOD;
+
+                tsIdx = (tsIdx + 1) % 10;
+
+                mu.lock();
+
+                self.postMessage({
+                  msg: 'ts',
+                  payload: tsIdx,
+                  time: -1
+                });
+                saveLog("ts request " + tsIdx);
+                Atomics.store(timestampLock, 0, 1);
+                saveLog("ts blocked " + tsIdx);
+                Atomics.wait(timestampLock, 0, 1);
+                saveLog("ts unblocked " + tsIdx);
+              }
+            }
+        } catch (error) {
+            console.error(error);
+            Atomics.store(runningState, 0 , 0);
+            //running = false;
+            return;
+        }
+    }
+    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+    saveLog("over cycles: ", cycles);
+
+    fps++;
+
+
+    const current = performance.now();
+    past = current;
+    const gap1 = current-startTime;
+    //console.log("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:green; color:white");
+    saveEmulLog("[GAP1]        {s_____e}   = " + gap1.toFixed(3));
+
+
+    if(fps > 59) {
+      saveLog(fps + " fps over 59, reset old delay 0");
+      isInitUpdate = true; // reset delay
+    }
+    
+    /*
+    if(isInitUpdate) {
+      console.log("init");
+      isInitUpdate = false;
+      next = current;
+      delayGap = Display.frameInterval - gap1;
+    } else {
+
+      // amortized
+      next += Display.frameInterval; //next += 16.74 or 8.37
+      delayGap = next - current;
+    
+                            // not amortized
+                            /*
+                            if((delayGap > 0) && (gap0 > delayGap)) {
+                              delayGap = Display.frameInterval - (gap0 - delayGap) - gap1;
+                            } else {
+                              delayGap = Display.frameInterval - gap1;
+                            }
+                            */
+    //}
+    
+
+    if(!setFirstNext) {
+      setFirstNext = true;
+      firstNext = current;
+      next = current;
+      delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
+      isInitUpdate = false;
+      setTimeout(noDelayUpdate, delayGap);
+      return;
+    }
+  
+    if(isInitUpdate) {
+      //console.log("init");
+      isInitUpdate = false;
+      next = Math.floor((current-firstNext)/_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval)*_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval + firstNext;
+    }
+     
+    next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
+    delayGap = next - current;
+
+
+    self.postMessage({ // recvQ
+      msg: 'M',
+      payload: -1,
+      time: -1
+    });
+}
+
+function update() {
   const startTime = performance.now();
   _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime = startTime;
   const gap0 = startTime - past;
@@ -238,34 +427,11 @@ function noDelayUpdate() {
     //console.log("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:green; color:white");
     saveEmulLog("[GAP1]        {s_____e}   = " + gap1.toFixed(3));
 
-
-    if(fps > 59) {
-      saveLog(fps + " fps over 59, reset old delay 0");
+    /*
+    if(gap1 > Display.frameInterval) {
       isInitUpdate = true; // reset delay
     }
-    
-    /*
-    if(isInitUpdate) {
-      console.log("init");
-      isInitUpdate = false;
-      next = current;
-      delayGap = Display.frameInterval - gap1;
-    } else {
-
-      // amortized
-      next += Display.frameInterval; //next += 16.74 or 8.37
-      delayGap = next - current;
-    
-                            // not amortized
-                            /*
-                            if((delayGap > 0) && (gap0 > delayGap)) {
-                              delayGap = Display.frameInterval - (gap0 - delayGap) - gap1;
-                            } else {
-                              delayGap = Display.frameInterval - gap1;
-                            }
-                            */
-    //}
-    
+    */
 
     if(!setFirstNext) {
       setFirstNext = true;
@@ -273,19 +439,24 @@ function noDelayUpdate() {
       next = current;
       delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
       isInitUpdate = false;
-      setTimeout(noDelayUpdate, delayGap);
+      setTimeout(update, delayGap);
       return;
+    }
+
+    const intervalPoint = Math.floor((current-firstNext)/_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval) * _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval + firstNext;
+    if((current - next) >= (intervalPoint + _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - current)) {
+      isInitUpdate = true;
     }
   
     if(isInitUpdate) {
       console.log("init");
       isInitUpdate = false;
-      next = Math.floor((current-firstNext)/_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval)*_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval + firstNext;
+      //next = Math.floor((current-firstNext)/Display.frameInterval) * Display.frameInterval + firstNext;
+      next = intervalPoint;
     }
      
     next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
     delayGap = next - current;
-
 
     self.postMessage({ // recvQ
       msg: 'M',
@@ -340,20 +511,24 @@ function loadAndStart(payload) {
   gb.setMessenger(self);
   try {
     gb.cartridge.load(rom);
-    running = true;
-    past = performance.now();
-    cycles = 0;
-    saveLog("load");
-
-    next = past;
-
-    noDelayUpdate();
-
-    printOld = past;
-    fpsInterval = setInterval(() => printFps(), 1000);
   } catch (error) {
     console.error(error);
   }
+}
+
+function playGame() {
+  //running = true;
+  Atomics.store(runningState, 0, 1);
+  past = performance.now();
+  cycles = 0;
+
+  next = past;
+
+  noDelayUpdate();
+  //update();
+
+  printOld = past;
+  fpsInterval = setInterval(() => printFps(), 1000);
 }
 
 /**
@@ -425,10 +600,15 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   Cartridge: () => (/* binding */ Cartridge)
 /* harmony export */ });
+/* harmony import */ var _rtc_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./rtc.js */ "./public/js/gb/rtc.js");
+
+
 class Cartridge {
     constructor(gb) {
         this.gb = gb;
     }
+
+    
 
     readROM(address) {
         switch (this.cartridgeType) {
@@ -826,54 +1006,90 @@ class Cartridge {
             throw 'wrong file size';
         }
 
-        const ramSize = file[0x149];
+        
+        this.ramSize = file[0x149];
         if (this.hasRAM) {
-            /**
-             * this cartridge type
-             * does not directly access localStorage from webworker
-             */
-            /*
-            if (this.hasBattery && this.title in localStorage) {
-                this.ram = new Uint8Array(localStorage[this.title].split(',').map(parseFloat));
-            } else {
-             */
-                switch (ramSize) {
-                    case 0x00:
-                        break;
-                    case 0x02:
-                        this.ram = new Uint8Array(0x2000);
-                        break;
-                    case 0x03:
-                        this.ram = new Uint8Array(0x8000);
-                        break;
-                    case 0x04:
-                        this.ram = new Uint8Array(0x20000);
-                        break;
-                    case 0x05:
-                        this.ram = new Uint8Array(0x10000);
-                        break;
-                    default:
-                        throw 'unknown RAM size: 0x' + ramSize.toString(16);
-                }
-            //}
+            self.postMessage({msg: 'ram', payload: this.title, time: -1});
         }
+      
         if (this.hasRTC) {
-            if (this.hasBattery && (this.title + 'TIME') in localStorage) {
-                this.rtc = new RTC();
-                Object.assign(this.rtc, JSON.parse(localStorage[this.title + 'TIME']));
-            } else {
-                this.rtc = new RTC();
+            console.log("hasRTC");
+            self.postMessage({msg: 'rtc', payload: this.title, time: -1});
+        } else {
+            console.log("not hasRTC");
+        }
+    }
+
+    doesHaveRtc() {
+        return (this.hasRTC != undefined);
+    }
+
+    setRam(localStorageRam) {
+        if (this.hasBattery && (localStorageRam != null)) { // this.title in localStorage
+            //this.ram = new Uint8Array(localStorageRam.split(',').map(parseFloat)); // localStorage[this.title].split(',').map(parseFloat)
+            this.ram = new Uint8Array(Object.values(localStorageRam).map(parseFloat));
+        } else {
+            switch (this.ramSize) {
+                case 0x00:
+                    break;
+                case 0x02:
+                    this.ram = new Uint8Array(0x2000);
+                    break;
+                case 0x03:
+                    this.ram = new Uint8Array(0x8000);
+                    break;
+                case 0x04:
+                    this.ram = new Uint8Array(0x20000);
+                    break;
+                case 0x05:
+                    this.ram = new Uint8Array(0x10000);
+                    break;
+                default:
+                    throw 'unknown RAM size: 0x' + ramSize.toString(16);
             }
         }
     }
 
+    setRtc(localStorageRtc) {       
+        if (this.hasBattery && (localStorageRtc != null)) { // (this.title + 'TIME') in localStorage
+            this.rtc = new _rtc_js__WEBPACK_IMPORTED_MODULE_0__.RTC();
+            Object.assign(this.rtc, localStorageRtc);
+            //Object.assign(this.rtc, JSON.parse(localStorageRtc)); // localStorage[this.title + 'TIME']
+        } else {
+            this.rtc = new _rtc_js__WEBPACK_IMPORTED_MODULE_0__.RTC();
+        }
+    }
+
     save() {
+        /*
         if (this.hasRAM && this.hasBattery) {
-            localStorage[this.title] = this.ram;
+            self.postMessage({msg: 'saveRam', payload: {
+                title: this.title,
+                ram: this.ram 
+              }, time: -1});
+            //localStorage[this.title] = this.ram;
         }
         if (this.hasRTC && this.hasBattery) {
-            localStorage[this.title + 'TIME'] = JSON.stringify(this.rtc);
+            self.postMessage({msg: 'saveRtc', payload: {
+                title: this.title,
+                rtc: this.rtc 
+              }, time: -1});
+            //localStorage[this.title + 'TIME'] = JSON.stringify(this.rtc);
         }
+        */
+        let savedRam = '';
+        if(this.hasRAM && this.hasBattery) {
+            savedRam = this.ram;
+        }
+        let savedRtc = '';
+        if(this.hasRTC && this.hasBattery) {
+            savedRtc = this.rtc;
+        }
+        self.postMessage({msg: 'saveData', payload: {
+            title: this.title,
+            ram: savedRam,
+            rtc: savedRtc 
+          }, time: -1});
     }
 }
 
@@ -1009,6 +1225,24 @@ class GameBoy {
     this.isSelfScAtPc18933 = false;
 
     this.logSelfScAtPc18933 = false;
+
+    this.flagDir = false;
+
+    this.flagwram = false;
+
+    this.targetObj = 24;//13;//24;
+
+    this.targetXloc = this.targetObj * 4 + 1;
+
+    this.passInit = false;
+  }
+
+  get a() {
+    return this._a;
+  }
+
+  set a(value) {
+    this._a = value;
   }
 
   get waitForIO() {
@@ -1151,13 +1385,27 @@ class GameBoy {
     saveEmulLog("after set if: " + after.toString(2) );
     */
 
-    const before = Atomics.or(this._if, 0, value & GameBoy.interrupts);
+    const before = Atomics.load(this._if, 0);
+    const after = Atomics.store(this._if, 0, value & GameBoy.interrupts);
     (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("before set if: " + before.toString(2) + " value: " + value.toString(2));
-    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("after set if: " + Atomics.load(this._if, 0).toString(2));
+    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("after set if: " + after.toString(2));
 
-    if((value & GameBoy.serialInterrupt) == GameBoy.serialInterrupt) {
-      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("self serialInterrupt");
+    if((before & 0x8) > 0) {
+      Atomics.or(this._if, 0, GameBoy.interrupts);
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("after re set serial: " + Atomics.load(this._if, 0).toString(2));
     }
+    
+    /*
+    const before = Atomics.or(this._if, 0, value & GameBoy.interrupts);
+    saveEmulLog("before set if: " + before.toString(2) + " value: " + value.toString(2));
+    saveEmulLog("after set if: " + Atomics.load(this._if, 0).toString(2));
+    */
+
+    /*
+    if((value & GameBoy.serialInterrupt) == GameBoy.serialInterrupt) {
+      saveEmulLog("self serialInterrupt");
+    }
+    */
   
     /*
       if(this._isSerialHandlerWorking) {
@@ -1192,8 +1440,10 @@ class GameBoy {
   clearInterrupt(interrupt) {
     //this._if[0] &= ~interrupt;
     const before = Atomics.and(this._if, 0, ~interrupt);
-    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("before clear if: " + before.toString(2) + " target: " + interrupt.toString(2));
-    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("after clear if: " + Atomics.load(this._if, 0).toString(2));
+    /*
+    saveEmulLog("before clear if: " + before.toString(2) + " target: " + interrupt.toString(2));
+    saveEmulLog("after clear if: " + Atomics.load(this._if, 0).toString(2));
+    */
   }
 
   callInterrupt(address) {
@@ -1205,6 +1455,10 @@ class GameBoy {
   readWRAM(address) {
     switch (address >> 12) {
       case 0:
+        if((address == (0 + this.targetXloc)) || (address == (1280 + this.targetXloc))) {
+          //console.log("read wram ", address);
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("read wram " + address + " value: " + this.wram[address]);
+        }
         return this.wram[address];
       case 1:
         return this.wram[((this._svbk == 0 ? 1 : this._svbk) << 12) | (address
@@ -1216,10 +1470,49 @@ class GameBoy {
     switch (address >> 12) {
       case 0:
         this.wram[address] = value;
+
+        /*
+        if(this.flagDir) {
+          if((address == 0) || (address == 1280)) {
+            saveEmulLog("write start wram " + address + " value: " + value);
+            this.flagwram = false;
+            break;
+          }
+
+          if((address == 159) || (address == 1280+159)) {
+            saveEmulLog("write end wram " + address + " value: " + value);
+            //this.flagwram = true;
+            break;
+          }
+
+          if((address == (0 + this.targetXloc - 1)) || (address == (1280 + this.targetXloc - 1))) {
+            saveEmulLog("write before wram " + address + " value: " + value);
+            //this.flagwram = true;
+            break;
+          }
+
+          if((address == (0 + this.targetXloc)) || (address == (1280 + this.targetXloc))) {
+            saveEmulLog("write wram " + address + " value: " + value);
+            this.flagwram = false;
+            if( value > 0 ) {
+              this.flagDir = false;
+            }
+            break;
+          }
+        }
+        */
+
+        /*
+        if((address == (0 + this.targetXloc - 1)) || (address == (1280 + this.targetXloc - 1))) {
+          this.flagwram = true;
+        }
+        */
+        if((address == (0 + this.targetXloc)) || (address == (1280 + this.targetXloc))) {
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("write wram " + address + " value: " + value);
+        }
         break;
       case 1:
-        this.wram[((this._svbk == 0 ? 1 : this._svbk) << 12) | (address
-            & 0xfff)] = value;
+        this.wram[((this._svbk == 0 ? 1 : this._svbk) << 12) | (address & 0xfff)] = value;
         break;
     }
   }
@@ -1250,10 +1543,18 @@ class GameBoy {
           } else {
             switch (address & 0xff) {
               case 0x00:
-                return this.joypad.p1;
+                const joypadVal = this.joypad.p1;
+                (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("read joypad: " + joypadVal);
+                if(joypadVal == 237) {
+                  this.flagDir = true;
+                  //this.flagwram = true;
+                }
+                return joypadVal;
               case 0x01:
                 //customLog("[get sb by cpu] ");
-                return this.serial.sb;
+                const returnSb = this.serial.sb;
+                (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("<< get sb ", returnSb);
+                return returnSb;
               case 0x02:
                 //saveEmulLog("read ff02: " + this.serial.sc);
                 //customLog("[get sc by cpu] ");
@@ -1314,6 +1615,9 @@ class GameBoy {
             }
           }
         } else if (address <= 0xfffe) {
+          if(address == 0xffc1) {            
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("read ffc1: " + this.hram[address & 0x7f]);
+          }
           return this.hram[address & 0x7f];
         } else {
           return this.ie;
@@ -1354,6 +1658,7 @@ class GameBoy {
                 this.joypad.p1 = value;
                 break;
               case 0x01:
+                (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("-> set sb ", value);
                 this.serial.sb = value;
 
                 /*
@@ -1406,6 +1711,9 @@ class GameBoy {
 
                   let time = -1;
                   if(this.pc === 18933) {
+                    this.passInit = true;
+                    console.log("passInit at first 18933");
+
                     this.selfScCount++;
             
                     this.isSelfScAtPc18933 = true;
@@ -1528,6 +1836,12 @@ class GameBoy {
             );
             this._logC1Flag = false;
             */
+
+            if(this.passInit) {
+              //this._logC1Flag = true;
+            }
+
+            (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("write ffc1: " + value);
             
             (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("postMessage c1 at write");
             self.postMessage({msg: 'c1', payload: this.serial.sb, time: value});
@@ -1546,12 +1860,15 @@ class GameBoy {
           
           this.hram[address & 0x7f] = value;
 
-        if(this.isSelfScAtPc18933){
-          if(address == 0xffd6 && value == 0) {
+       
+        if(address == 0xffd6 && value == 0) { // write c1 도 여기까지 옴..
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("cycles at 0xffd6: ", Atomics.load(this._timing, 0));
+          if(this.isSelfScAtPc18933){
             this.isSelfScAtPc18933 = false;
             self.postMessage({msg: 'sm', payload: this.serial.sb, time: value});
           }
         }
+        
 
         } else {
           this.ie = value;
@@ -1748,7 +2065,7 @@ class GameBoy {
 
     Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0
 
-    //Atomics.add(this._timing, 0, 1);
+    Atomics.add(this._timing, 0, 1);
 
     let cycles = 0;
     if ((this.ime || this.halt) && (this.ie & this.if) != 0) {
@@ -1761,9 +2078,9 @@ class GameBoy {
           " pc: " + this.pc);
         }
 
-        if(this._logC1Flag) {
-          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[RETI ~ write] at interrupt: " + (this.ie & this.if).toString(2));
-        }
+    
+        this.printInstr("[write C1 ~ read C1] at interrupt: " + (this.ie & this.if).toString(2));
+   
 
         this.ime = false;
         if ((this.ie & this.if & GameBoy.vblankInterrupt) != 0) {
@@ -1781,6 +2098,8 @@ class GameBoy {
               end of logging
           */
           this.logSelfScAtPc18933 = false;
+
+          this._logC1Flag = false;
 
           if(this.logCounter != 0) {
             (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("something among jump,RETI,write missed or over :" + this.logCounter);
@@ -1802,6 +2121,7 @@ class GameBoy {
           this._isSerialHandlerWorking = true;
           
         } else if ((this.ie & this.if & GameBoy.joypadInterrupt) != 0) {
+          console.log("key interrupt!");
           this.clearInterrupt(GameBoy.joypadInterrupt);
           this.callInterrupt(0x0060);
         }
@@ -1811,9 +2131,11 @@ class GameBoy {
         console.log("cpu do nothing?!");
       }
     } else {
+      /*
       if(this._logC1Flag) {
-        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[RETI ~ write] at not intr: halt: " + this.halt + ", hdmaOn: " + this.display.hdmaOn);
+        saveEmulLog("[RETI ~ write] at not intr: halt: " + this.halt + ", hdmaOn: " + this.display.hdmaOn);
       }
+      */
       cycles += (this.halt || this.display.hdmaOn) ? 1 : this.decode();
     }
 
@@ -1843,6 +2165,13 @@ class GameBoy {
     return cycles / (this.doubleSpeed ? 2 : 1);
   }
 
+
+  printInstr(value) {
+    if(this._logC1Flag) {
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)(value);
+    }
+  }
+
   decode() {
     this.oldPc = this.pc;
     const instr = this.readAddress(this.pc++);
@@ -1853,25 +2182,11 @@ class GameBoy {
       " pc: " + this.pc);
     }
 
-    if(this._setAFlag) {
-      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("during set A instr: " + (instr.toString(2)));
-    }
-
     let cycles = GameBoy.instrCycles[instr];
     const quad = instr >> 6, op1 = (instr & 0x3f) >> 3, op2 = instr & 0x7;
 
-    if(this.logSelfScAtPc18933){
-      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[processRecvQ ~ jump] at decode: " +  (instr.toString(2)) + 
-      " quad: " +
-    quad + 
-    " op1: " +
-    op1 +
-    " op2: " +
-    op2);
-    }
-
-    if(this._logC1Flag) {
-      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[RETI ~ write] at decode: " +  (instr.toString(2)) + 
+    if(this.flagwram){
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[writeWRAM 0/1280 ~ writeWRAM 1/1281] at decode: " +  //(instr.toString(2)) + 
       " quad: " +
     quad + 
     " op1: " +
@@ -1882,24 +2197,24 @@ class GameBoy {
 
     if (quad === 0) {
       if (op2 == 6) {
-        // LD r, n
+        this.printInstr("LD r, n");
         const imm = this.readAddress(this.pc++);
         this.writeRegister(op1, imm);
       } else if (op2 == 2) {
         if ((op1 & 0x1) != 0) {
-          // LD A, (rr)
+          this.printInstr("LD A, (rr)");
           this.a = this.readDoubleRegisterIndirect(op1 >> 1);
         } else {
-          // LD (rr), A
+          this.printInstr("LD (rr), A");
           this.writeDoubleRegisterIndirect(op1 >> 1, this.a);
         }
       } else if ((op1 & 0x1) == 0 && op2 == 1) {
-        // LD dd, nn
+        this.printInstr("LD dd, nn");
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         this.writeDoubleRegister(op1 >> 1, (imm2 << 8) | imm1);
       } else if (op1 == 1 && op2 == 0) {
-        // LD (nn), SP
+        this.printInstr("LD (nn), SP");
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         let address = (imm2 << 8) | imm1;
@@ -2026,10 +2341,10 @@ class GameBoy {
       }
     } else if (quad === 1) {
       if (op1 != 6 || op2 != 6) {
-        // LD r, r'
+        this.printInstr("LD r, r'");
         this.writeRegister(op1, this.readRegister(op2));
       } else {
-        // HALT
+        this.printInstr("HALT");
         this.halt = true;
       }
     } else if (quad === 2) {
@@ -2103,10 +2418,10 @@ class GameBoy {
       }
     } else if (quad === 3) {
       if (op1 == 6 && op2 == 2) {
-        // LD A, (C)
+        this.printInstr("LD A, (C)");
         this.a = this.readAddress(0xff00 | this.c);
       } else if (op1 == 4 && op2 == 2) {
-        // LD (C), A
+        this.printInstr("LD (C), A");
         this.writeAddress(0xff00 | this.c, this.a);
       } else if (op1 == 6 && op2 == 0) {
         // LD A, (n)
@@ -2115,15 +2430,18 @@ class GameBoy {
         if( this._setAFlag) {
           (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("set a: " + this.a + " from addr: 0x" + (0xff00 | imm).toString(16));
         }
+        this.printInstr("LD A, (n) = set a: " + this.a + " from addr: 0x" + (0xff00 | imm).toString(16));
       } else if (op1 == 4 && op2 == 0) {
         // LD (n), A
         const imm = this.readAddress(this.pc++);
 
         const targetAddr = (0xff00 | imm);
 
-        if(this.logSelfScAtPc18933){
-          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("LD "+ targetAddr.toString(16) + ", " + this.a);
+        if(this.flagwram) {//if(this.logSelfScAtPc18933){
+          (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("LD (n), A "+ targetAddr.toString(16) + ", " + this.a);
         }
+
+        this.printInstr("LD (n), A = "+ targetAddr.toString(16) + ", " + this.a);
 
         if(this._setAFlag) {
           if(targetAddr == 0xff01) {
@@ -2141,7 +2459,7 @@ class GameBoy {
         
         this.writeAddress(0xff00 | imm, this.a);
       } else if (op1 == 7 && op2 == 2) {
-        // LD A, (nn)
+        this.printInstr("LD A, (nn)");
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         this.a = this.readAddress((imm2 << 8) | imm1);
@@ -2155,15 +2473,17 @@ class GameBoy {
           (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("LD "+ targetAddr.toString(16) + ", " + this.a);
         }
 
+        this.printInstr("LD (nn), A = "+ targetAddr.toString(16) + ", " + this.a);
+
         this.writeAddress(targetAddr, this.a);
       } else if (op1 == 7 && op2 == 1) {
         // LD SP, HL
         this.sp = this.hl;
       } else if ((op1 & 0x1) == 0 && op2 == 5) {
-        // PUSH qq
+        this.printInstr("PUSH qq");
         this.pushDoubleRegister(op1 >> 1);
       } else if ((op1 & 0x1) == 0 && op2 == 1) {
-        // POP qq
+        this.printInstr("POP qq");
         this.popDoubleRegister(op1 >> 1);
       } else if (op1 == 7 && op2 == 0) {
         // LDHL SP, e
@@ -2275,14 +2595,14 @@ class GameBoy {
         // JP HL
         this.pc = this.hl;
       } else if (op1 == 1 && op2 == 5) {
-        // CALL nn
+        this.printInstr("CALL nn");
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         this.writeAddress(--this.sp, this.pch);
         this.writeAddress(--this.sp, this.pcl);
         this.pc = (imm2 << 8) | imm1;
       } else if ((op1 & 0x4) == 0 && op2 == 4) {
-        // CALL cc, nn
+        this.printInstr("CALL cc, nn");
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         if (this.readCondition(op1 & 0x3)) {
@@ -2292,7 +2612,7 @@ class GameBoy {
           cycles += 3;
         }
       } else if (op1 == 1 && op2 == 1) {
-        // RET
+        this.printInstr("RET");
         this.pc = this.readAddress(this.sp++);
         this.pc |= this.readAddress(this.sp++) << 8;
         if(this._setAFlag) {
@@ -2300,7 +2620,7 @@ class GameBoy {
           this._setAFlag = false;
         }
       } else if (op1 == 3 && op2 == 1) {
-        // RETI
+        this.printInstr("RETI");
         this.pc = this.readAddress(this.sp++);
         this.pc |= this.readAddress(this.sp++) << 8;
         this.ime = true;
@@ -2328,7 +2648,7 @@ class GameBoy {
         }
         */  
       } else if ((op1 & 0x4) == 0 && op2 == 0) {
-        // RET cc
+        this.printInstr("RET cc");
         if (this.readCondition(op1 & 0x3)) {
           this.pc = this.readAddress(this.sp++);
           this.pc |= this.readAddress(this.sp++) << 8;
@@ -2339,7 +2659,7 @@ class GameBoy {
           }
         }
       } else if (op2 == 7) {
-        // RST t
+        this.printInstr("RST t");
         this.writeAddress(--this.sp, this.pch);
         this.writeAddress(--this.sp, this.pcl);
         this.pc = op1 << 3;
@@ -2348,14 +2668,15 @@ class GameBoy {
           this._setAFlag = false;
         }
       } else if (op1 == 6 && op2 == 3) {
-        // DI
+        this.printInstr("DI");
         this.ime = false;
       } else if (op1 == 7 && op2 == 3) {
-        // EI
+        this.printInstr("EI");
         this.ime = true;
         if(this.logSelfScAtPc18933){
           (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("ime set true, ie: " + (this.ie).toString(2) + " if: " + (this.if).toString(2));
         }
+        this.printInstr("ime set true, ie: " + (this.ie).toString(2) + " if: " + (this.if).toString(2));
       } else {
         throw 'unknown instruction: 0x' + instr.toString(16);
       }
@@ -2367,6 +2688,20 @@ class GameBoy {
     const instr = this.readAddress(this.pc++);
     let cycles = GameBoy.cbInstrCycles[instr];
     const quad = instr >> 6, op1 = (instr & 0x3f) >> 3, op2 = instr & 0x7;
+
+    
+    if(this.flagwram){
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_7__.saveEmulLog)("[writeWRAM 0/1280 ~ writeWRAM 1/1281] at decode_cb: " +  //(instr.toString(2)) + 
+      " quad: " +
+    quad + 
+    " op1: " +
+    op1 +
+    " op2: " +
+    op2);
+    }
+
+
+
     if (quad == 0) {
       const r = this.readRegister(op2);
       if (op1 == 0) {
@@ -2597,6 +2932,12 @@ class Display {
         this.bgPriority = new Uint8Array(Display.width);
 
         this.priorRenderLap = 0;
+
+        this.previousObjX = {};
+
+        this.findFirstX = false;
+
+        this.targetObj = 24;//13;//24;
     }
 
     get lcdc() {
@@ -2627,6 +2968,8 @@ class Display {
 
     set dma(value) {
         const src = value << 8;
+        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_2__.saveEmulLog)("set OAM by DMA ", (src & 0x1fff));
+        //console.log("set OAM by DMA " + src + " " + ((src & 0x1fff)));
         for (let index = 0; index < this.oam.length; index++) {
             this.oam[index] = this.gb.readAddress(src + index)
         }
@@ -2972,6 +3315,7 @@ class Display {
             }
         }
 
+        //saveEmulLog("rednerLineColor, objOn: ", this.objOn);
         if (this.objOn) {
             const objs = [];
             for (let obj = 0; obj < 40 && objs.length < 10; obj++) {
@@ -2994,6 +3338,59 @@ class Display {
                 const bankAddress = (attr & 0x8) << 10;
                 const paletteNumber = attr & 0x7;
 
+                /*
+                if(this.previousObjX[obj] !== undefined) {
+                    const previousValue = this.previousObjX[obj];
+                    let colorDecorate;
+                    let direction = "same";
+                    let keyDownColor = "black";
+                    if(this.findFirstX == false) {
+                        if(previousValue != objX) {
+                            this.findFirstX = true;
+                        
+                            if(previousValue > objX) {
+                                direction = "left";
+                                keyDownColor = "red";
+                            } else if (previousValue < objX) {
+                                direction = "right";
+                                keyDownColor = "green";
+                            }
+                            saveEmulLog(`mv ${direction} xloc: ${objX} obj: ${obj}`);
+                            colorDecorate = "background: " + keyDownColor + "; color: white;";
+                            console.log(`mv %c${direction} xloc: ${objX} obj: ${obj}`, colorDecorate);
+                           
+                            
+                            //console.log(`mv %c${direction} yloc: ${objY} xloc: ${objX} tile: ${tile} attr: ${attr} obj: ${obj}`, colorDecorate);
+                            //console.log(`${this.oam[obj * 4]}, ${this.oam[obj * 4 + 1]}, ${this.oam[obj * 4 + 2]}, ${this.oam[obj * 4 + 3]} `)
+                            
+                        }
+                    }
+                }
+                */
+                /*
+                if(this.previousObjX[obj] !== undefined) {
+                    if(obj == this.targetObj) {
+                        const previousValue = this.previousObjX[obj];
+                        let direction = "same";
+                        let keyDownColor = "black";
+                        if(previousValue != objX) {
+                            if(previousValue > objX) {
+                                direction = "left";
+                                keyDownColor = "red";
+                            } else if (previousValue < objX) {
+                                direction = "right";
+                                keyDownColor = "green";
+                            }
+
+                            saveEmulLog(`mv ${direction} xloc: ${objX} obj: ${obj} tile: ${tile}`);
+                            const colorDecorate = "background: " + keyDownColor + "; color: white;";
+                            console.log(`mv %c${direction} xloc: ${objX} obj: ${obj} tile: ${tile}`, colorDecorate);
+                        }
+                       // saveEmulLog(`mv ${direction} xloc: ${objX} obj: ${obj}`);
+                    }
+                }
+                this.previousObjX[obj] = objX;
+                */
                 if (objX > -8 && objX < Display.width) {
                     let tileY = this.ly - objY;
                     if (yFlip) {
@@ -3009,6 +3406,13 @@ class Display {
                         const palette = (((this.vram[tileAddress + 1] << tileX) & 0x80) >> 6) | (((this.vram[tileAddress] << tileX) & 0x80) >> 7);
 
                         if (palette != 0 && (!this.bgOn || this.bgClear[x] == 0 || (this.bgPriority[x] == 0 && !priority))) {
+                            /*
+                            if(obj == this.targetObj) {
+                                this.pixels[address + x] = 0xff00FF00;// 0xff00ffff;//Display.colorPalette[this.objColorPalette[paletteNumber][palette]]
+                            } else {
+                                this.pixels[address + x] = Display.colorPalette[this.objColorPalette[paletteNumber][palette]];
+                            };
+                            */
                             this.pixels[address + x] = Display.colorPalette[this.objColorPalette[paletteNumber][palette]];
                         }
                     }
@@ -3022,11 +3426,14 @@ class Display {
         Display.ctx.putImageData(this.imageData, 0, 0);
         Display.fps++;
         //customLog("GameBoy start time: ", GameBoy.startTime.toFixed(3));
-        const current = performance.now();
-        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_1__.customLog)("%c render after(" + Display.renderCpuCycles + "): " + (current - _cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime).toFixed(3),"background:black; color:white");
-        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_1__.customLog)("renderLap: " + (current - this.priorRenderLap).toFixed(3));
-        this.priorRenderLap = current;
+        //const current = performance.now();
+        //customLog("%c render after(" + Display.renderCpuCycles + "): " + (current - GameBoy.startTime).toFixed(3),"background:black; color:white");
+        //customLog("renderLap: " + (current - this.priorRenderLap).toFixed(3));
+        //this.priorRenderLap = current;
         Display.renderCpuCycles = 0;
+
+        //this.findFirstX = false;
+        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_2__.saveEmulLog)("renderFrame");
     }
 
     cycle() {
@@ -3191,6 +3598,165 @@ class Joypad {
 
 /***/ }),
 
+/***/ "./public/js/gb/rtc.js":
+/*!*****************************!*\
+  !*** ./public/js/gb/rtc.js ***!
+  \*****************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   RTC: () => (/* binding */ RTC)
+/* harmony export */ });
+class RTC {
+    constructor() {
+        this.time = 0;
+
+        this._latch = false;
+
+        this.sec = 0;
+        this.min = 0;
+        this.hour = 0;
+        this.day = 0;
+        this.high = 0;
+
+        this.secLatch = 0;
+        this.minLatch = 0;
+        this.hourLatch = 0;
+        this.dayLatch = 0;
+        this.highLatch = 0;
+    }
+
+    set latch(value) {
+        const _latch = (value & 0x1) != 0;
+        if (!this._latch && _latch) {
+            this.secLatch = this.sec;
+            this.minLatch = this.min;
+            this.hourLatch = this.hour;
+            this.dayLatch = this.day;
+            this.highLatch = this.high;
+        }
+        this._latch = _latch;
+    }
+
+    get s() {
+        return this.secLatch;
+    }
+
+    set s(value) {
+        this.sec = value;
+    }
+
+    get m() {
+        return this.minLatch;
+    }
+
+    set m(value) {
+        this.min = value;
+    }
+
+    get h() {
+        return this.hourLatch;
+    }
+
+    set h(value) {
+        this.hour = value;
+    }
+
+    get dl() {
+        return this.dayLatch;
+    }
+
+    set dl(value) {
+        this.day = value;
+    }
+
+    get dh() {
+        return 0x3e | this.highLatch;
+    }
+
+    set dh(value) {
+        this.high = value;
+    }
+
+    updateTime() {
+        if ((this.high & 0x40) == 0) {
+            const cur = Math.floor(Date.now() / 1000);
+            while (this.time + 60 * 60 * 24 < cur) {
+                this.time += 60 * 60 * 24;
+                this.day++;
+                if (this.day == 256) {
+                    this.day = 0;
+                    if ((this.high & 0x1) != 0) {
+                        this.high |= 0x80;
+                    }
+                    this.high ^= 0x1;
+                }
+            }
+            while (this.time + 60 * 60 < cur) {
+                this.time += 60 * 60;
+                this.hour++;
+                if (this.hour == 24) {
+                    this.hour = 0;
+                    this.day++;
+                    if (this.day == 256) {
+                        this.day = 0;
+                        if ((this.high & 0x1) != 0) {
+                            this.high |= 0x80;
+                        }
+                        this.high ^= 0x1;
+                    }
+                }
+            }
+            while (this.time + 60 < cur) {
+                this.time += 60;
+                this.min++;
+                if (this.min == 60) {
+                    this.min = 0;
+                    this.hour++;
+                    if (this.hour == 24) {
+                        this.hour = 0;
+                        this.day++;
+                        if (this.day == 256) {
+                            this.day = 0;
+                            if ((this.high & 0x1) != 0) {
+                                this.high |= 0x80;
+                            }
+                            this.high ^= 0x1;
+                        }
+                    }
+                }
+            }
+            while (this.time < cur) {
+                this.time++;
+                this.sec++;
+                if (this.sec == 60) {
+                    this.sec = 0;
+                    this.min++;
+                    if (this.min == 60) {
+                        this.min = 0;
+                        this.hour++;
+                        if (this.hour == 24) {
+                            this.hour = 0;
+                            this.day++;
+                            if (this.day == 256) {
+                                this.day = 0;
+                                if ((this.high & 0x1) != 0) {
+                                    this.high |= 0x80;
+                                }
+                                this.high ^= 0x1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+/***/ }),
+
 /***/ "./public/js/gb/serial.js":
 /*!********************************!*\
   !*** ./public/js/gb/serial.js ***!
@@ -3252,7 +3818,7 @@ class Serial {
 
   get sb() {
     const value = Atomics.load(this._sb, 0);
-    (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)("<< get sb ", value);
+    //saveEmulLog("<< get sb ", value);
     return value;
   }
 
@@ -3299,11 +3865,13 @@ class Serial {
     if (this.transferInProgress) {
       if (++this.divider >= Serial.transferTime) {
         this.transferInProgress = false;
-        this._messenger.postMessage({
+        self.postMessage({
           msg: 'Q',
           payload: this._sb[0],
-          time: -1 //Atomics.load(this.gb.timing, 0)
+          time: -1 // Atomics.load(this.gb.timing, 0)
         });
+        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)("sendQ cycle: ",  Atomics.load(this.gb.timing, 0));
+        Atomics.store(this.gb.timing, 0);
         //customLog("%c 104 serial cycle:" + this.serialCycle, "background:brown; color:white");
         this.serialCycle = 0;
         //customLog("++ serial blocked ", Atomics.load(this.gb.timing, 0));
@@ -3376,6 +3944,10 @@ class Sound {
         this.genCount = 0;
 
         this._messenger = null;
+
+        this.limiter = (this.bufferLen * Sound.cyclesPerSample);
+
+        this.dummy = 0;
     }
 
     set messenger(value) {
@@ -3957,25 +4529,59 @@ class Sound {
         left *= (this.leftVolume + 1) / 8;
         right *= (this.rightVolume + 1) / 8;
 
-        const idx = (this.cycles / Sound.cyclesPerSample) % this.bufferLen;
+        const samples = (this.cycles / Sound.cyclesPerSample);
+        const idx = samples % this.bufferLen;
         this.bufferLeft[idx] = left / Sound.channelCount + Sound.ctxKeeper;
         this.bufferRight[idx] = right / Sound.channelCount + Sound.ctxKeeper;
   
-        if(((this.cycles / Sound.cyclesPerSample) % Sound.bufferSamples) == (Sound.bufferSamples - 1)) {
+        const samplesFilled = samples % Sound.bufferSamples;
+        if(samplesFilled == (Sound.bufferSamples - 1)) {
             const old = Atomics.add(this.filled, 0, Sound.bufferSamples);
             //console.log("fill: " + (old + Sound.bufferSamples));
         }
+
+        /*
+            fix: set upperbound for the sound.cycles
+        */
+        if(this.dummy >= this.limiter) {
+            this.dummy = this.dummy - this.limiter;
+            //console.log("%c update dummyCycle of sound: " + this.dummy + " cycles: " + this.cycles, "background:cyan");
+        }
+
+        /*
+        if(this.cycles >= this.limiter) {
+            this.cycles = this.cycles - this.limiter;
+        }
+        */
+
+        const dummySamples = (this.dummy / Sound.cyclesPerSample);
+        if(idx != (dummySamples % this.bufferLen)) {
+            console.log("not same at mod bufferLen of dummySamples");
+        }
+
+        if(samplesFilled != (dummySamples % Sound.bufferSamples)) {
+            console.log("not same at mod bufferSamples of dummySamples");
+        }
+        
     }
 
     cycle() {
         this.cycles += Sound.cyclesPerCPUCycle;
+        this.dummy += Sound.cyclesPerCPUCycle;
+        
         if (this.soundEnable) {
             if (this.cycles % Sound.cyclesPerSample == 0) {
+                if (this.dummy % Sound.cyclesPerSample != 0) {
+                    console.log("not same rate at cyclesPerSample");
+                }
                 this.updateTrigger();
                 this.updateDAC();
                 this.updateFrequency();
             }
             if (this.cycles % Sound.cyclesPerFrame == 0) {
+                if (this.dummy % Sound.cyclesPerFrame != 0) {
+                    console.log("not same rate at cyclesPerFrame");
+                }
                 this.frame++;
                 switch (this.frame % 8) {
                     case 2:

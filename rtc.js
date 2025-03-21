@@ -34449,6 +34449,9 @@ const soundFilled = new Int32Array(soundFilledSab);
 const soundLeftSab = new SharedArrayBuffer(soundBufferLen * 4);
 const soundRightSab = new SharedArrayBuffer(soundBufferLen * 4);
 
+const runningSab = new SharedArrayBuffer(4);
+const runningState = new Int32Array(runningSab);
+
 const timestampLock = new Int32Array(networkTimingBuffer);
 const timing = new Int32Array(timingBuffer);
 const lock = new Int32Array(sharedBuffer);
@@ -34487,7 +34490,8 @@ const postLock = new Int32Array(postBuffer);
 function saveMainLog(...args) {
   const message = args.join(' ');
   const enterId = orderLock.getId();
-  const line = "[main] : " + enterId + " $ " + message
+  const paddedEnterId = enterId.toString().padStart(2, ' ');
+  const line = "[main] : " + paddedEnterId + " $ " + message
   logger.postMessage({option:0, data:line});
 }
 
@@ -34531,7 +34535,7 @@ function pingChecker() {
 logger.onmessage = e => {
   const outputLines = e.data;
   const formattedOutput = outputLines.join('\r\n'); // Add CRLF to each line
-  saveVariableDataAsFile(formattedOutput, 'emullog.txt');
+  saveVariableDataAsFile(formattedOutput, 'emullog.txt', 'text/plain');
   
   /*
   console.log("write log");
@@ -34542,9 +34546,9 @@ logger.onmessage = e => {
   */
 }
 
-function saveVariableDataAsFile(data, filename) {
+function saveVariableDataAsFile(data, filename, type) {
     // Create a Blob from the data
-    const blob = new Blob([data], { type: 'text/plain' }); // Change type as needed (e.g., 'application/json' for JSON data)
+    const blob = new Blob([data], { type: type}); // Change type as needed (e.g.,'text/plain' 'application/json' for JSON data)
   
     // Create a link element
     const link = document.createElement('a');
@@ -34572,6 +34576,14 @@ function processNextMessage() {
 }
 
 function webSocketOnMessage(event) {
+  /*
+  const randomDelay = Math.floor(Math.random() * 21);
+  setTimeout(() => webRtcOnMessage(event), randomDelay);
+  */
+  webRtcOnMessage(event);
+}
+
+function webRtcOnMessage(event) {
   messageQueue.push({callback: webSocketHandler, event: event});
   processNextMessage();
 }
@@ -34581,9 +34593,12 @@ worker.onmessage = event => {
   processNextMessage();
 };
 
+let sendId = -1;
+let recvId = -1;
 function sendMessage(msg) {
-  const output = _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendTransfer(msg);
-  saveMainLog(output);
+  const { message, count } = _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendTransfer(msg);
+  saveMainLog("SEND " + message);
+  sendId = count;
 }
 
 let waitScQueue = [];
@@ -34599,6 +34614,8 @@ function waitTsHandler(){
   sendMessage("TS timestamp");
 }
 
+let grandSendValue = -1;
+let grandRecvValue = -1;
 let sendValue;
 let recvValue;
 let isPassedP4b8a = false; // starter 는? 필요없나? recv
@@ -34670,10 +34687,11 @@ function waitC1Handler(recvSb, readySb) {
 }
 
 let linkingPhase = false;
+let count4b8a = 0;
 function processRecvQ(receivedSb, readySb) {
 
   /*
-      w 0  // start Atomic
+      w 0  // w0 상태에서 응답은 비정상응답임. w0 이후  w *, self sb  2개 모두 갱신 된 이후에 응답해야 정상 응답. 
   */
   if(c1Value == 0 && isPassedP4b8a) {
     console.log("%c c1Value == 0 && isPassedP4b8a", "background:red; color:white");
@@ -34693,40 +34711,77 @@ function processRecvQ(receivedSb, readySb) {
       p 40 40
   */
   if(recvValue == 75 && sendValue == 138) {
-    if (receivedSb != 64 || readySb != 64) {
-      saveMainLog("not 40 ready after recv 4b");
-      waitC1Queue.unshift({callback: waitC1Handler, recvSb: receivedSb});
+    /*
+        [p 4b 8a] at #3,5,7 have [p 0xCD 0xCD]
+        only #3,5,7 response after sb 40 is ready.
+        skip #2,4,6 
+        becuase I don't want to write the extra hardcode for all combination of the character selection at #6
 
-      if(Atomics.load(timestampLock, 0) === 1) {
-        saveMainLog("release by self, not 40 for 4b");
-        console.log("release by self, not 40 for 4b");
-        sendMessage("K skip");
-        releasingTimestampLock();
-      }
+        0x4b at #3,5,7 is retransmitted after [p 0xcd 0xcd] is exchanged.
+        [p 0x4b 0xcd]
+        it works!
+        I don't have to write character selection combination code!
+    */
+   /*
+      fix: make it possible to choose the all combination of characters at the double play mode in multiplay.
+   */
+    //if(grandSendValue == 205) { // [P 4b (cd)], [P cd (cd)]
 
-      return;
-    } 
-    
-    if(isSelfScAtPc18933) {
-      saveMainLog("not yet arrived ffd6 at #5");
-      waitC1Queue.unshift({callback: waitC1Handler, recvSb: receivedSb});
+    /*
+        P 0x40 0x40 or P 0x80 0x80
+        P 0x4b 0x8a #6
+        P 0x40 0x40
+        ...
+        P 0x40 0x80
+        P 0x4b 0x8a <--- by pass here, it changes by the combination of the characters
+        P 0x40 0x80 
+        ...
+        P 0xcd 0xcd
+        P 0x4b 0x8a #7
+        P 0x40 0x40
+    */
+    if((grandRecvValue == 64 && grandSendValue == 128) == false) {
+      if (receivedSb != 64 || readySb != 64) {
+        saveMainLog("not 40 ready after recv 4b");
+        waitC1Queue.unshift({callback: waitC1Handler, recvSb: receivedSb});
 
-      if(Atomics.load(timestampLock, 0) === 1) {
-        saveMainLog("release by self, not 40 for 4b");
-        console.log("release by self, not 40 for 4b");
-        sendMessage("K skip");
-        releasingTimestampLock();
-      }
+        if(Atomics.load(timestampLock, 0) === 1) {
+          saveMainLog("release by self, not 40 ready after recv 4b");
+          console.log("release by self, not 40 ready after recv 4b");
+          sendMessage("K skip");
+          releasingTimestampLock();
+        }
 
-      return;
-    } 
+        return;
+      } 
+      
+      /*
+        p 4b 8a
+        self sb 0x40
+        self sc 130
+        -- here --
+        write ffd6
+      */
+      if(isSelfScAtPc18933) {
+        saveMainLog("not yet arrived ffd6 at #5");
+        waitC1Queue.unshift({callback: waitC1Handler, recvSb: receivedSb});
+
+        if(Atomics.load(timestampLock, 0) === 1) {
+          saveMainLog("release by self, not yet arrived ffd6 at #5");
+          console.log("release by self, not yet arrived ffd6 at #5");
+          sendMessage("K skip");
+          releasingTimestampLock();
+        }
+
+        return;
+      } 
   } 
+}
 
   blocking();
   
   setSlave(receivedSb);
 
-  saveMainLog("packet [ P 0x" + receivedSb.toString(16) + " 0x" + readySb.toString(16) + " ]");
   /*
     bypass the MarioTennis init exchanges ..
     p c1 c0
@@ -34738,11 +34793,18 @@ function processRecvQ(receivedSb, readySb) {
   */
   consumeC1();
 
+  saveMainLog("sendR cycle: " + Atomics.load(timing, 0));
+  Atomics.store(timing, 0);
+
   linkingPhase = false;
   if((receivedSb == 193 && readySb == 192) || (receivedSb == 193 && readySb == 0)) {
     linkingPhase = true;
     produceC1();
   } 
+
+
+  grandSendValue = sendValue;
+  grandRecvValue = recvValue;
 
   sendValue = readySb;
   recvValue = receivedSb;
@@ -34756,12 +34818,17 @@ function processRecvQ(receivedSb, readySb) {
     p 4b 8a
   */
   if(receivedSb == 75 && readySb == 138) {
+    count4b8a++;
+    console.log("%c pass 4b 8a: " + count4b8a, "background:yellow");
     isPassedP4b8a = true;
   }
 
   releasing();
 
   sendMessage("R " + readySb);
+
+  saveMainLog("packet [ P 0x" + receivedSb.toString(16) + " 0x" + readySb.toString(16) +
+              " ]  recvId: " + recvId + ", sendId: " + sendId);
 }
 
 function recvTsHandler() {
@@ -34834,9 +34901,10 @@ let firstRecvQ = false;
 
 function webSocketHandler(e) {
   saveMainLog("RECV " + e.data);
-  //saveMainLog("interrupt flag at RECV: " + (Atomics.load(interruptFlag, 0)).toString(2));
 
   const obj = JSON.parse(e.data);
+  recvId = obj.sender;
+
   switch (obj.type) {
     case 'L':
       recvL = true;
@@ -34871,12 +34939,13 @@ function webSocketHandler(e) {
       sendQflag = false;
 
       setMaster(parseInt(obj.msg, 10));
+
+      //isSelfSetSb = false;
       /*
         for blocking from serial
       */
       releasing();
       saveMainLog("webSocketHanlder R release");
-
 
       break;
     case 'K':
@@ -34978,9 +35047,50 @@ let updatedSb = -1;
 function workerHandler(event) {
   const {msg, payload, time} = event.data;
 
+  if(msg == 'log') {
+    logger.postMessage({option:0, data:payload});
+    return;
+  }
+
+  saveMainLog("msg from worker : " + msg + ", payload: " + payload + " , arg: " + time);
+
   switch (msg) {
-    case 'log':
-      logger.postMessage({option:0, data:payload});
+    case 'ram':
+      /*
+      if(payload in localStorage) {
+        ramVal = localStorage[payload];
+      }
+      */
+      worker.postMessage({
+        msg: 'ram',
+        payload: ramVal
+      });
+      break;
+    case 'saveData':
+      const combinedDataRtc = {
+        rtc: payload.rtc,
+        ram: payload.ram // Include ram data in the combined object
+      };
+      saveVariableDataAsFile(JSON.stringify(combinedDataRtc), payload.title + '.json', 'application/json'); // Save combined data to a file
+      break;
+    case 'saveRtc':
+      //localStorage[payload.title + 'TIME'] = JSON.stringify(payload.rtc);
+      //saveVariableDataAsFile(JSON.stringify(payload.rtc), payload.title + 'TIME.json','application/json'); // Save RTC data to a file
+      break;
+    case 'saveRam':
+      //localStorage[payload.title] = payload.ram;
+      //saveVariableDataAsFile(payload.ram, payload.title + '.json','application/json'); // Save RAM data to a file
+      break;
+    case 'rtc':
+      /*
+      if((payload + 'TIME') in localStorage) {
+        rtcVal = localStorage[payload + 'TIME'];
+      }
+      */
+      worker.postMessage({
+        msg: 'rtc',
+        payload: rtcVal
+      });
       break;
     case 'Q':
       /**
@@ -34988,10 +35098,10 @@ function workerHandler(event) {
           0 : not blocked
           1 : blocked
        */
-      saveMainLog("workerHandler before");
+      //saveMainLog("workerHandler before");
       while(Atomics.load(lock, 0) === 0) {
       }
-      saveMainLog("workerHandler after");
+      //saveMainLog("workerHandler after");
 
       sendSb = payload;
       sendMessage("Q " + sendSb + "/" + isWriteUpdated);
@@ -35002,18 +35112,31 @@ function workerHandler(event) {
 
       break;
     case 'c1':
-      saveMainLog("onMessage c1: " + time + ", sb: " + payload + " waitC1Queue.len: " + waitC1Queue.length);
+      //saveMainLog("onMessage c1: " + time + ", sb: " + payload + " waitC1Queue.len: " + waitC1Queue.length);
      
-      saveMainLog("c1 before being locked");
+      //saveMainLog("c1 before being locked");
       while(!isPostLockBlocking()) {
       }
-      saveMainLog("c1 after being locked");
+      //saveMainLog("c1 after being locked");
 
       isWriteUpdated = true;
 
       c1Value = time;
 
       produceC1();
+
+      if(payload == 192) { // 0xC0
+        saveMainLog("[Exception] game finished. sb:c0 set");
+        console.log("%c[Exception] game finished. sb:c0 set", "background:yellow");
+        /*
+            fix: init variables to make relink connection possible
+        */
+        isSelfSetSb = false;
+        firstRecvQ = false;
+        isPassedP4b8a = false;
+        releasePostLock();
+        return;
+      }
 
       if(isSelfSetSb) {
         if(c1Value == 0) {
@@ -35034,7 +35157,8 @@ function workerHandler(event) {
         */
 
         /*
-           block writeLock
+            block writeLock
+            wait at write ffc1 
         */
         blockWriteLock();
         releasePostLock();
@@ -35101,12 +35225,12 @@ function workerHandler(event) {
 
       break;
     case 'sb': // set sb is called not in the serial handler
-      saveMainLog("onMessage sb: " + payload + " waitC1Queue.len: " + waitC1Queue.length);
+      //saveMainLog("onMessage sb: " + payload + " waitC1Queue.len: " + waitC1Queue.length);
 
-      saveMainLog("self sb before being locked");
+      //saveMainLog("self sb before being locked");
       while(!isPostLockBlocking()) {
       }
-      saveMainLog("self sb after being locked");
+      //saveMainLog("self sb after being locked");
 
       updatedSb = payload;
  
@@ -35122,10 +35246,10 @@ function workerHandler(event) {
 
       break;
     case 'sc':
-      saveMainLog("sc before being locked");
+      //saveMainLog("sc before being locked");
       while(!isPostLockBlocking()) {
       }
-      saveMainLog("sc after being locked");
+      //saveMainLog("sc after being locked");
 
       if(waitScQueue.length > 0) {
         const {callback, recvSb} = waitScQueue.shift();
@@ -35195,10 +35319,10 @@ function workerHandler(event) {
       });
       break;
     case 'ts':
-      saveMainLog("tslock before");
+      //saveMainLog("tslock before");
       while(Atomics.load(timestampLock, 0) === 0) {
       }
-      saveMainLog("tslock after");
+      //saveMainLog("tslock after");
 
       if(recvF) {
         saveMainLog("netRole: "+ _rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole +" do not wait, there is recvF, skip sendTS until sendQ.");
@@ -35366,7 +35490,8 @@ function setMaster(value) {
 
   Atomics.or(interruptFlag, 0, 0x8);
 
-  saveMainLog("packet [ A 0x" + value.toString(16) + " 0x" + sendSb.toString(16) +" ]");
+  saveMainLog("packet [ A 0x" + value.toString(16) + " 0x" + sendSb.toString(16) +
+              " ]  recvId: " + recvId + ", sendId: " + sendId);
 }
 
 function setSlave(value) {
@@ -35394,7 +35519,7 @@ startDemoButton.addEventListener('click', () => {
       }
     }
   });
-  xhr.open('GET', 'test.gbc'); //test.gbc // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
+  xhr.open('GET', '/public/test.gbc'); //test.gbc // /public/TennisWorld.gb --> npm run build    ./TennisWorld.gb --> npm start
   xhr.send();
 });
 
@@ -35419,19 +35544,55 @@ const keyValues = {
   ArrowRight: 7
 };
 
+let keyCount = 10;
+let keymsg;
+
 function keyHandler(ev) {
+  let keyDownCode;
+  let keyUpCode;
   switch (ev.type) {
     case 'keydown':
-      keyBuffer[keyValues[ev.code]] = true;
-      saveMainLog("keyDown: " + ev.code);
+      keyDownCode = [keyValues[ev.code]];
+      keyCount = (keyCount + 1) % 100;
+      keymsg = keyCount + " keyDown: " + ev.code;
+      /*
+        fix: position unsync problem in multiPlay
+      */
+      if(keyDownCode == 6) {
+        keyBuffer[7] = false;
+        //console.log("%c" + keymsg, "background:red; color:white");
+      } else if(keyDownCode == 7) {
+        keyBuffer[6] = false;
+        //console.log("%c" + keymsg, "background:green; color:white");
+      } else if(keyDownCode == 4) {
+        keyBuffer[5] = false;
+      } else if(keyDownCode == 5) {
+        keyBuffer[4] = false;
+      }
+   
+      keyBuffer[keyDownCode] = true;
+   
+      saveMainLog(keymsg);
       break;
     case 'keyup':
-      keyBuffer[keyValues[ev.code]] = false;
+      keyUpCode = [keyValues[ev.code]];
+      keyBuffer[keyUpCode] = false;
+      keymsg = keyCount + " keyUp: " + ev.code;
+
+      /*
+      if(keyUpCode == 6) {
+        console.log("%c" + keymsg, "background:white; color:red; font-weight: bold;");
+      } else if(keyUpCode == 7) {
+        console.log("%c" + keymsg, "background:white; color:green; font-weight: bold;");
+      }
+      */
+
+      saveMainLog(keymsg);
       break;
   }
 }
 
-/*
+
 function mouseHandler(ev) {
   const childDiv = ev.target.closest('.childDiv'); // Replace '.childDiv' with your child div class
   let keyNumber;
@@ -35443,6 +35604,15 @@ function mouseHandler(ev) {
 
   switch (ev.type) {
     case 'touchstart':
+      if(keyNumber == 6) {
+        keyBuffer[7] = false;
+      } else if(keyNumber == 7) {
+        keyBuffer[6] = false;
+      } else if(keyNumber == 4) {
+        keyBuffer[5] = false;
+      } else if(keyNumber == 5) {
+        keyBuffer[4] = false;
+      }
       keyBuffer[keyNumber] = true;
       //saveMainLog("mouseDown: " + keyNumber);
       break;
@@ -35463,7 +35633,7 @@ parentDiv.addEventListener('touchend', (ev) => {
   messageQueue.push({callback: mouseHandler, event: ev});
   processNextMessage();
 });
-*/
+
 
 const multiPlayCheckBox = document.querySelector('#multiPlayCheckBox');
 let gameData;
@@ -35505,6 +35675,7 @@ function runGame(rom, multiPlay) {
   worker.postMessage({
         msg: 'init',
         payload: {
+          runningSab: runningSab,
           multiPlay: multiPlay,
           canvas: canvasWorker, uInt8Array: uInt8Array,
           flagSharedBuffer: flagSharedBuffer,
@@ -35533,22 +35704,31 @@ function runGame(rom, multiPlay) {
       [canvasWorker, uInt8Array.buffer]);
 }
 
-/*
-document.addEventListener('click', () => {
-  if (soundCtx.state != 'running') {
-      soundCtx.resume();
+
+addEventListener('beforeunload', () => {
+  if (Atomics.load(runningState,0) == 1) {
+    saveCartridge();
   }
 });
-*/
 
+function saveCartridge() {
+  console.log("save cartridge");
+  worker.postMessage({
+    msg: 'save',
+    payload: -1
+  });
+}
+
+let ramVal = null;
+let rtcVal = null;
 /*
 const romFileInput = document.getElementById('romFileInput');
 let romFile;
 romFileInput.addEventListener('change', () => {
   
-  if (running) {
-    gb.cartridge.save();
-    running = false;
+  if (Atomics.load(runningState, 0) == 1) {
+    saveCartridge();
+    Atomics.store(runningState, 0, 0);
   }
 
   const reader = new FileReader();
@@ -35559,6 +35739,18 @@ romFileInput.addEventListener('change', () => {
   reader.readAsArrayBuffer(romFileInput.files[0]);
 });
 */
+
+document.getElementById('saveFileInput').addEventListener('change', (event) => {
+  const file = event.target.files[0]; // Get the selected file
+  const reader = new FileReader(); // Create a FileReader to read the file
+  reader.onload = (e) => {
+      const data = JSON.parse(e.target.result); // Parse the JSON data
+      ramVal = data.ram; // Extract ram data
+      rtcVal = data.rtc; // Extract rtc data
+      console.log("saveFile is loaded");
+  };
+  reader.readAsText(file); // Read the file as text
+});
 
 const canvas = document.getElementById('waveform');
 const canvasCtx = canvas.getContext('2d');
@@ -35783,7 +35975,11 @@ class Messenger {
         "msg": content
       };
       this.send(talkMsg);
-      return "SEND " + JSON.stringify(talkMsg);
+     
+      return {
+        message: JSON.stringify(talkMsg),
+        count: this.sendCount
+      }
     }
 }
 
