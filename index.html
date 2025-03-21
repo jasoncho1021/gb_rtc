@@ -2,33 +2,18 @@
 <html>
 
 <head>
-  <title></title>
-  <!-- script src="./coi-serviceworker.js"></script -->
-  
-  <!-- link href="mcw.css" rel="stylesheet">
-  <script src="mcw.js"></script>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/css/bootstrap.min.css"
-        rel="stylesheet"
-        integrity="sha384-giJF6kkoqNQ00vy+HMDP7azOuL0xtbfIcaT9wjKHr8RbDVddVHyTfAAsrekwKmP1"
-        crossorigin="anonymous"-->
-    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
-
-           <!-- update the version number as needed -->
-    <!-- script defer src="/__/firebase/5.9.3/firebase-app.js" ></script -->
-    <!-- include only the Firebase features as you need -->
-    <!-- script defer src="/__/firebase/5.9.3/firebase-firestore.js" ></script -->
-    <!-- initialize the SDK after all desired features are loaded -->
-    <!-- script defer src="/__/firebase/init.js"></script -->
-
-    <!-- script defer src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
-<script defer src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js"></script -->
-
   <meta name="viewport" content="width=device-width">
-<script defer src="coi.js"></script><script defer src="emul.js"></script><script defer src="soundprocessor.js"></script><script defer src="rtc.js"></script><script defer src="log.js"></script><link href="rtc.css" rel="stylesheet"></head>
+  <link rel="shortcut icon" href="#">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+  <title></title>
+<script defer src="coi.js"></script><script defer src="rtc.js"></script><link href="rtc.css" rel="stylesheet"></head>
 
 <body class="bg-light text-dark">
-
-    <div id="buttons">
+  <label>
+    <input type="checkbox" id="multiPlayCheckBox">
+      Multi Play
+  </label>
+    <div id="buttons" class="togglehidden">
         <button class="mdc-button mdc-button--raised" disabled id="createBtn">
             <i class="material-icons mdc-button__icon" aria-hidden="true">group_add</i>
             <span class="mdc-button__label">Create room</span>
@@ -41,22 +26,20 @@
             <i class="material-icons mdc-button__icon" aria-hidden="true">close</i>
             <span class="mdc-button__label">Hangup</span>
         </button>
-        <button id="printLogBtn">
-          print log
+        <button class="mdc-button mdc-button--raised" disabled id="copyBtn">
+          <span class="mdc-button__label">copy room id</span>
         </button>
-        <buttion id="copyBtn">
-          copy room id
-        </buttion> 
-        <button id="pingCheckerBtn"></button>
-          ping check
-        </button>  
+        <button class="mdc-button mdc-button--raised" disabled id="pingCheckerBtn">
+          <span class="mdc-button__label">ping check</span>
+        </button>
+        <span id="pingResult"></span>
     </div>
     <div>
         <span id="currentRoom"></span>
         <input id="roomId" type="hidden">
     </div>
-    
-  
+
+
     <div class="mdc-dialog"
          id="room-dialog"
          role="alertdialog"
@@ -70,7 +53,7 @@
                     Enter ID for room to join:
                     <div class="mdc-text-field">
                         <input type="text" id="room-id" class="mdc-text-field__input">
-                        <label class="mdc-floating-label" for="my-text-field">Room ID</label>
+                        <label class="mdc-floating-label" for="my-text-field"></label>
                         <div class="mdc-line-ripple"></div>
                     </div>
                 </div>
@@ -87,39 +70,50 @@
         </div>
         <div class="mdc-dialog__scrim"></div>
     </div>
-    
 
-
-
-
-
-
-
-
-
-
-
+    <div class="mdc-dialog"
+         id="connected-dialog"
+         role="alertdialog"
+         aria-modal="true"
+         aria-labelledby="my-dialog-title"
+         aria-describedby="my-dialog-content">
+        <div class="mdc-dialog__container">
+            <div class="mdc-dialog__surface">
+                <h2 class="mdc-dialog__title" id="my-dialog-title">Connected!</h2>
+                <!-- div class="mdc-dialog__content" id="my-dialog-content">
+                    Let's Select Rom
+                </div -->
+                <footer class="mdc-dialog__actions">
+                  <button type="button" class="mdc-button mdc-dialog__button" data-mdc-dialog-action="yes">
+                      <span class="mdc-button__label">Close</span>
+                  </button>
+              </footer>
+            </div>
+        </div>
+        <div class="mdc-dialog__scrim"></div>
+    </div>
 
 <div class="container-fluid my-3">
   <div class="row">
-    <canvas id="waveform" width="1900" height="800"></canvas>
+    <canvas id="waveform" width="0" height="0"></canvas> <!--w 1900, h 800 -->
   </div>
   <div class="row">
     <div class="col-md-2"></div>
     <div class="col-md">
       <main class="container px-0">
-        <div class="container my-3 text-center">
-          <h1 class="display-6"><span class="fw-bold"></span></h1>
+        <div class="container my-3">
+          <h1 class="display-6">FPS: <span id="fps" class="fw-bold"></span></h1>
         </div>
         <div class="container px-0">
           <div class="row">
             <div class="col-md">
-              <div class="container my-3 px-0 border rounded bg-white">
-                <canvas id="canvas" class="d-block w-100"
-                        style="image-rendering: crisp-edges; image-rendering: pixelated;"></canvas>
+              <div class="container my-3 px-0 border rounded bg-white" style="position: relative; aspect-ratio: 192 / 176;">
+                  <div class="waiting paused" id="waitingText" style="position: absolute; top: 50%; left: 10%;">
+                  </div>
+                  <canvas id="canvas" class="d-block w-100" style="position: absolute; top: 0; left: 0;
+                  image-rendering: crisp-edges; image-rendering: pixelated;"></canvas>
               </div>
-
-              <div class="gameboy parentDiv">
+              <!-- div class="gameboy parentDiv">
                 <div class=arrow>
                   <div class="left childDiv" data-child-number="6"></div>
                   <div class="up childDiv" data-child-number="5"></div>
@@ -134,17 +128,23 @@
                     <div class="selbutton childDiv" data-child-number="0">sel</div>
                   <div class="startbutton childDiv" data-child-number="1">start</div>
                 </div>
-                </div>
+              </div -->
 
-              <div class="container my-3 px-0">
-                <label for="startDemoButton" class="btn btn-dark w-100">Start Demo</label>
-              </div>
+              <!-- div class="container my-3 px-0">
+                <label for="startDemoButton" class="btn btn-dark w-100">Start</label>
+              </div -->
               <div class="container my-3 px-0">
                 <label for="romFileInput" class="btn btn-dark w-100">Select ROM</label>
               </div>
-              <input type="button" id="startDemoButton" class="d-none"/>
+              <div class="container my-3 px-0">
+                <label for="saveFileInput" class="btn btn-dark w-100">Select SaveFile</label>
+              </div>
+              <!-- input type="button" id="startDemoButton" class="d-none"/ -->
               <input type="file" id="romFileInput" accept=".gb, .gbc" class="d-none"/>
+              <input type="file" id="saveFileInput" accept=".json" class="d-none"/>
+
             </div>
+
             <div class="col-md">
               <div class="accordion my-3 bg-white" id="controlAccordion">
                 <div class="accordion-item">
@@ -212,19 +212,9 @@
     <div class="col-md-2"></div>
   </div>
 </div>
-<!-- script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/js/bootstrap.bundle.min.js"
-        integrity="sha384-ygbV9kiqUc6oa4msXn9868pTtWMgiQaeYH7/t7LECLbyPA2x65Kgf80OJFdroafW"
-        crossorigin="anonymous"></script -->
-
-
-<!-- script src="js/sync.js"></script>
-<script src="js/orderlock.js"></script>
-< script src="logger.js"></script -->
-
-<!-- script type="module" src="messenger.js"></script>
-<script type="module" src="rtc.js"></script>
-<script type="module" src="js/adapter.js"></script -->
-
+<button class="mdc-button mdc-button--raised" id="printLogBtn">
+  <span class="mdc-button__label">print log</span>
+</button>
 </body>
 
 </html>
