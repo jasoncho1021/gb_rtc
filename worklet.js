@@ -2,21 +2,14 @@
 /*!**************************************!*\
   !*** ./public/js/sound-processor.js ***!
   \**************************************/
-console.log('open');
-
 class SoundProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
 
-        console.log('in constructor');
-
-        this.remains = 0;
-        this.idx = 0;
-
+        /*
         this.drawBuffer = new Float32Array(4096);
         this.drawIdx = 0;
-
-        this.isActive = true;
+        */
 
         this.port.onmessage = (event) => {
             const {msg, payload} = event.data;
@@ -26,8 +19,9 @@ class SoundProcessor extends AudioWorkletProcessor {
                     this.channels = new Array(2);
                     this.channels[0] = new Float32Array(payload.leftSab);
                     this.channels[1] = new Float32Array(payload.rightSab);
+                    this.idx = 0;
                     this.bufferLen = payload.bufferLen;
-                    console.log("receive processor");
+                    this.isActive = true;
                     break;
                 case 'stop':
                     this.stop();
@@ -59,23 +53,25 @@ class SoundProcessor extends AudioWorkletProcessor {
         }
         */
 
-        this.remains = Atomics.load(this.filled, 0);
-        //console.log("remains: " + this.remains);
-
-        if(this.remains <= 0) {
+        if(Atomics.load(this.filled, 0) <= 0) {
+            //console.log("not consume: " + (this.idx % 4096) + " " + this.idx);
             console.log("not consume");
 
             for(let i = 0; i < len; i++) {
                 outputCh1[i] = 0.000001;
                 outputCh2[i] = 0.000001;
-          
-                this.drawBuffer[this.drawIdx] = 0;
-                this.drawIdx = (this.drawIdx+1)%4096;
+            }
+
+            /*
+            for(let i = 0; i < len; i++) {
+                this.drawBuffer[this.drawIdx] = 0.000001;
+                this.drawIdx = (this.drawIdx + 1) % 4096;
             }
 
             if(this.drawIdx == 0) {
                 this.port.postMessage({waveform: this.drawBuffer});
             }
+            */
 
             return true;
         }
@@ -86,15 +82,20 @@ class SoundProcessor extends AudioWorkletProcessor {
             
             this.idx = (this.idx + 1) % this.bufferLen;
 
+            /*
             this.drawBuffer[this.drawIdx] = outputCh1[i];
-            this.drawIdx = (this.drawIdx+1)%4096;
+            this.drawIdx = (this.drawIdx + 1) % 4096;
+            */
         }
 
-        const old = Atomics.sub(this.filled, 0, len);
+        Atomics.sub(this.filled, 0, len);
 
+        /*
         if(this.drawIdx == 0) {
             this.port.postMessage({waveform: this.drawBuffer});
         }
+        */
+        
         return true;
     }
     

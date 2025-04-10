@@ -2,29 +2,6 @@
 /******/ 	"use strict";
 /******/ 	var __webpack_modules__ = ({
 
-/***/ "./public/dummylogger.js":
-/*!*******************************!*\
-  !*** ./public/dummylogger.js ***!
-  \*******************************/
-/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
-
-__webpack_require__.r(__webpack_exports__);
-/* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   customLog: () => (/* binding */ customLog)
-/* harmony export */ });
-function customLog(...args) {
-    // Join the arguments into a single string
-    //const message = args.join(' '); // You can customize the separator if needed
-    //logs.push(message); // Store the log message
-    //saveLine(message);
-    // Optionally, log to the console as well
-    //console.log(message); // This line can be removed if you don't want to log to the console
-    //console.log(...args);
-    //saveLine(message);
-}
-
-/***/ }),
-
 /***/ "./public/js/emulworker.js":
 /*!*********************************!*\
   !*** ./public/js/emulworker.js ***!
@@ -37,53 +14,18 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./gb/cpu.js */ "./public/js/gb/cpu.js");
 /* harmony import */ var _gb_display_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./gb/display.js */ "./public/js/gb/display.js");
-/* harmony import */ var _sync_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./sync.js */ "./public/js/sync.js");
-/* harmony import */ var _orderlock_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./orderlock.js */ "./public/js/orderlock.js");
-/*
-importScripts('gb/cartridge.js',
-    'gb/cpu.js',
-    'gb/display.js',
-    'gb/joypad.js',
-    'gb/rtc.js',
-    'gb/serial.js',
-    'gb/sound.js',
-    'gb/timer.js',
-    'sync.js',
-    'orderlock.js',
-  '../dummylogger.js');
-*/
+/* harmony import */ var _orderlock_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./orderlock.js */ "./public/js/orderlock.js");
 
 
  // Adjust based on actual exports
- // Adjust based on actual exports
 
-
-//const { Mutex } = self; 
-//const { OrderLock } = self;
-
-let delayGap = 0;
-let timestampLock = 0;
-let mu;
-let orderLock;
-const maxSize = 1024 * 1024 * 1000;
-
-let sharedArray;
-let sharedBuffer;
-//let currentDataSize = 0; // Track the current size of data written
-
-// Initialize TextEncoder and TextDecoder once
-const txtEncoder = new TextEncoder();
-const txtDecoder = new TextDecoder();
-
-let sharedCurrentSizeBuffer;
-let sharedCurrentSize;
 
 function saveEmulLog(...args) {
-  //saveLogImpl(...args);
   //console.log(args.join(' '));
   const message = args.join(' ');
   const enterId = orderLock.getId();
-  const line = "[    ] : " + enterId + " $ " + message;
+  const paddedEnterId = enterId.toString().padStart(2, ' ');
+  const line = "[    ] : " + paddedEnterId + " $ " + message;
 
   self.postMessage({
     msg: 'log',
@@ -96,58 +38,41 @@ function saveLog(...args) {
   
 }
 
-function saveLogImpl(...args) {
-  const enterId = orderLock.lock();
-  //console.log("emul [GET LOCK]");
-  const line = "[" + enterId + "] " + args.join(' ');
-  
-  let currentSize = Atomics.load(sharedCurrentSize, 0);
-  const encodedLine = txtEncoder.encode(line + '\n'); // Add newline for separation
-  const lineSize = encodedLine.length;
 
-  // Check if there is enough space in the buffer
-  if (currentSize + lineSize > maxSize) {
-      console.log('Buffer is full. Cannot add more data.');
-      orderLock.unLock();
-      return false; // Indicate that the buffer is full
-  }
+let delayGap = 0;
+let orderLock;
 
-  // Store the encoded line in the buffer atomically
-  for (let i = 0; i < lineSize; i++) {
-      Atomics.store(sharedArray, currentSize + i, encodedLine[i]);
-  }
+let multiPlay = false;
+let runningState;
 
-  // Update the current size atomically
-  Atomics.add(new Int32Array(sharedBuffer), 0, lineSize); // Assuming the first 4 bytes of the buffer are used for currentSize
-  //currentSize += lineSize; // Update the current size
-  Atomics.add(sharedCurrentSize, 0, lineSize);
-
-  orderLock.unLock();
-  //console.log("emul [RELEASE LOCK]");
-  return true; // Indicate success
-}
+let masterContext;
+let slaveContext;
 
 self.onmessage = event => {
   const {msg, payload} = event.data;
+
   switch (msg) {
     case 'init':
+      masterContext = payload.masterContext;
+      slaveContext = payload.slaveContext;
+
+      runningState = new Int32Array(masterContext.runningSab);
+      
+      multiPlay = payload.multiPlay;
+
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas = payload.canvas;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.getContext('2d');
-      timestampLock = new Int32Array(payload.networkTimingBuffer);
+
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas = payload.slaveCanvas;
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCtx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.getContext('2d');
   
-      mu = _sync_js__WEBPACK_IMPORTED_MODULE_2__.Mutex.connect(payload.smu);
+      orderLock = _orderlock_js__WEBPACK_IMPORTED_MODULE_2__.OrderLock.connect(payload.orderLock);
 
-      sharedBuffer = payload.buffer;
-      sharedArray = new Uint8Array(sharedBuffer);
-
-      sharedCurrentSizeBuffer = payload.currentSizeBuffer;
-      sharedCurrentSize = new Int32Array(sharedCurrentSizeBuffer);
-
-      orderLock = _orderlock_js__WEBPACK_IMPORTED_MODULE_3__.OrderLock.connect(payload.orderLock);
-
-      loadAndStart(payload);
+      loadAndStart(payload.rom, masterContext, slaveContext, payload.bufferLen);
       break;
     case 'restart':
       const current = performance.now();
@@ -157,16 +82,6 @@ self.onmessage = event => {
       saveLog("delayGap     : ", delayGap.toFixed(3));
       saveLog("travelTime   : ", travelTime.toFixed(3));
       saveLog("leftDelayTime: ", leftDelayTime.toFixed(3));
-
-      /*
-      if(payload.isNextRecvQ) {
-        saveLog("****0       : nextRecvQ is true");
-        preStart();
-        saveLog("****0       break");
-        return;
-      }
-      */
-
       
       if(delayGap <= 0) { // repay armotized delay by skipping the wait time
         //console.log("**** 1      : Gap1 is exceed 16.74");
@@ -203,43 +118,65 @@ self.onmessage = event => {
       noDelayUpdate();
       return;
     case 'stop':
-      running = false;
+      //running = false;
+      Atomics.store(runningState, 0, 0);
       clearInterval(fpsInterval);
       return;
+    case 'save':
+      /*
+          should add gbSlave
+      */
+      gb.cartridge.save();
+      return;
     default:
-      //saveLog(event);
       console.log(event);
   }
 };
 
 let gb;
+let gbSlave;
 let cycles;
 let next;
 let paused = false;
-let running = false;
 
 let past;
 
-let oldUpdateGap = 0;
 let fps = 0;
 let isInitUpdate = true;
 
-let pastGap = 0;
-
-let timestamp = 0;
-let mainLock;
-let tsIdx = 0;
-
 function preStart() {
+  /*
   self.postMessage({
     msg: 'T',
     payload: -1,
     time: -1
   });
+  */
+  noDelayUpdate();
 }
 
-let cpuCycles = 0;
-const PERIOD = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame/3;
+
+let setFirstNext = false;
+let firstNext = 0;
+
+let slaveCycles = 0;
+
+let masterInstrCycles = 0;
+let masterHwCycles = 0;
+let masterOutputDeviceCycles = 0;
+let masterHalt = false;
+
+let slaveInstrCycles = 0;
+let slaveHwCycles = 0;
+let slaveOutputDeviceCycles = 0;
+let slaveHalt = false;
+
+let masterWaitSc = false;
+let slaveWaitSc = false;
+
+let masterSkipOutputDivice = false;
+let slaveSkipOutputDivice = false;
+
 
 function noDelayUpdate() {
   const startTime = performance.now();
@@ -247,120 +184,219 @@ function noDelayUpdate() {
   const gap0 = startTime - past;
   //saveLog("start time: ", startTime.toFixed(3));
   
-  //console.log("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white")
-  saveEmulLog("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
+  //console.log("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
+  //saveEmulLog("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
 
 
-    if (paused || !running) {
-        return;
-    }
-    if (gb.cartridge.hasRTC) {
-        gb.cartridge.rtc.updateTime();
-    }
+  if (paused || (Atomics.load(runningState, 0) == 0)) {//!running) {
+      return;
+  }
+  if (gb.cartridge.hasRTC) {
+      gb.cartridge.rtc.updateTime();
+  }
+  if (multiPlay && gbSlave.cartridge.hasRTC) {
+      gbSlave.cartridge.rtc.updateTime();
+  }
 
-    let needHeadSync = true;
+  let loopCnt = 0;
+  while ((cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame)) { // && (slaveCycles < Display.cpuCyclesPerFrame)
+      try {
+          loopCnt++;
+        /*
+          각 에뮬이 어떤 명령어를 사용하느냐에 따라 2개의 값이 누적값이 다름.
+          특히 0 cycle 반환할떄 상대방은 tick 돌고있음 ( STOP, HALT 는 0 반환 )
 
-    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-        try {
-          /*
-              1 per gap
-          */
-          if(needHeadSync) {
-            needHeadSync = false;
-            tsIdx = (tsIdx + 1) % 10;
+          상대방이 HALT 면 나도 tick하지 않기..
+        */
+       
+          if(masterHwCycles == 0 && masterWaitSc == false && slaveHalt == false) { //  && masterWaitSc == false
 
-            mu.lock();
+            if(masterSkipOutputDivice == true) {
+              masterSkipOutputDivice = false;
 
-            self.postMessage({
-              msg: 'ts',
-              payload: tsIdx,
-              time: -1
-            });
-            saveLog("ts request " + tsIdx);
-            Atomics.store(timestampLock, 0, 1);
-            saveLog("ts blocked " + tsIdx);
-            Atomics.wait(timestampLock, 0, 1);
-            saveLog("ts unblocked " + tsIdx);
-          }
+              while(masterOutputDeviceCycles > 0) {
+                gb.outputDeviceCycle();
+                masterOutputDeviceCycles--;
+              }
+              gb.checkHdmaTrigger();
+              cycles += gb.getSpeedCycle(masterInstrCycles);
+            }
 
-            cpuCycles = gb.cycle();
-            cycles += cpuCycles;
-            
+      
+            masterInstrCycles = gb.cycle();
             /*
-              [TODO]
-              if the user try to start 1p,
-              this logic should be skipped
-
-            
-            timestamp += cpuCycles;
-            if(timestamp >= PERIOD) {
-              timestamp = timestamp - PERIOD;
-
-              tsIdx = (tsIdx + 1) % 10;
-
-              
-              mu.lock();
-
-              self.postMessage({
-                msg: 'ts',
-                payload: tsIdx,
-                time: -1
-              });
-              saveLog("ts request " + tsIdx);
-              Atomics.store(timestampLock, 0, 1);
-              saveLog("ts blocked " + tsIdx);
-              Atomics.wait(timestampLock, 0, 1);
-              saveLog("ts unblocked " + tsIdx);
-              
+            masterCycleQueue.push(masterInstrCycles);
+            if(masterCycleQueue.length > 3) {
+              masterCycleQueue.shift();
             }
             */
+
+            if(slaveWaitSc && gb.serial.sc == 254) {
+              gbSlave.serial.exchange();
+              slaveWaitSc = false;
+            }
+
+    
+            if (masterInstrCycles == 0) {
+              masterHalt = true;
+              //console.log("master halt");
+            } else {
+              masterHalt = false;
+            }
             
-        } catch (error) {
-            console.error(error);
-            running = false;
-            return;
-        }
-    }
-    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-    saveLog("over cycles: ", cycles);
+            masterHwCycles = masterInstrCycles;
+            masterOutputDeviceCycles += gb.getSpeedCycle(masterInstrCycles);
+          }
+
+          if(slaveHalt == false && masterHwCycles > 0 && masterWaitSc == false) {
+            masterWaitSc = gb.hardwareCycle();
+            masterHwCycles--;
+          }
+
+          if(masterHwCycles == 0 && masterWaitSc == true) {
+            masterSkipOutputDivice = true;
+          }
+
+          /**
+           *   gb.hardwareCycle()에서 masterWaitSc = true, masterHwCycles == 0 가 되면
+           *   gb.outputDeviceCycle() 은 수행 안 된다.
+           * 
+           *   gbSlave에서 masterWaitSc = false 하면
+           * 
+           *   보류된 gb.outputDeviceCycle() 안 돌고 다음 masterInstrCycles = gb.cycle() 로 넘어가네.. 
+           *   일단 += 로 직전 outputcycle도 살려두긴 하는데
+           */
+
+          if(slaveHalt == false && masterHwCycles == 0 && masterWaitSc == false) {
+            while(masterOutputDeviceCycles > 0) {
+              gb.outputDeviceCycle();
+              masterOutputDeviceCycles--;
+            }
+            gb.checkHdmaTrigger();
+            cycles += gb.getSpeedCycle(masterInstrCycles);
+          }
+        
+
+          if(multiPlay) {
+
+            if(slaveHwCycles == 0 && slaveWaitSc == false && masterHalt == false) { // && slaveWaitSc == false
+             
+              if(slaveSkipOutputDivice == true) {
+                slaveSkipOutputDivice = false;
+                console.log("do slaveSkipped");
+
+                while(slaveOutputDeviceCycles > 0) {
+                  gbSlave.outputDeviceCycle();
+                  slaveOutputDeviceCycles--;
+                }
+                gbSlave.checkHdmaTrigger();
+                slaveCycles += gbSlave.getSpeedCycle(slaveInstrCycles);
+              }
+             
+
+              slaveInstrCycles = gbSlave.cycle();
+              /*
+              slaveCycleQueue.push({ m: masterInstrCycles, s: slaveInstrCycles,});
+              if(slaveCycleQueue.length > 3) {
+                slaveCycleQueue.shift();
+              }
+              */
+
+              /*
+              if(masterInstrCycles != slaveInstrCycles) {
+                console.log(slaveCycleQueue);
+                //throw new Error();
+              }
+              */
+
+              if(masterWaitSc && gbSlave.serial.sc == 254) {
+                gb.serial.exchange();
+                masterWaitSc = false;
+              }
+
+              if (slaveInstrCycles == 0) {
+                slaveHalt = true;
+                //console.log("slave halt");
+              } else {
+                slaveHalt = false;
+              }
+
+              slaveHwCycles = slaveInstrCycles;
+              slaveOutputDeviceCycles += gbSlave.getSpeedCycle(slaveInstrCycles);
+            }
+
+            if(masterHalt == false && slaveHwCycles > 0 && slaveWaitSc == false) {
+              slaveWaitSc = gbSlave.hardwareCycle();
+              slaveHwCycles--;
+            }
+
+            if(slaveHwCycles == 0 && slaveWaitSc == true) {
+              slaveSkipOutputDivice = true;
+            }
+
+            if(masterHalt == false && slaveHwCycles == 0  && slaveWaitSc == false) {
+              while(slaveOutputDeviceCycles > 0) {
+                gbSlave.outputDeviceCycle();
+                slaveOutputDeviceCycles--;
+              }
+              gbSlave.checkHdmaTrigger();
+              slaveCycles += gbSlave.getSpeedCycle(slaveInstrCycles);
+            }
+          }
+
+      } catch (error) {
+          console.error(error);
+          //running = false;
+          Atomics.store(runningState, 0 , 0);
+          return;
+      }
+  }
+    
+  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
+  if(multiPlay) {
+    slaveCycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;  
+  }
+  
+  
+  if(cycles != slaveCycles) {
+    //console.log(`%cmasterCycles: ${cycles}, slaveCycles: ${slaveCycles}`,"background:blue; color:white;");
+    //saveEmulLog(`masterCycles: ${cycles}, slaveCycles: ${slaveCycles}`);
+    /*
+    console.log(`oldoldmasterInstrCycles: ${oldoldMasterInstrCycle}, slave:  ${oldoldSlaveInstrCycle}`);
+    console.log(`oldmasterInstrCycles: ${oldMasterInstrCycle}, slave:  ${oldSlaveInstrCycle}`);
+    console.log(`masterInstrCycles: ${masterInstrCycles}, slave:  ${slaveInstrCycles}`);
+    console.log(masterCycleQueue);
+    console.log(slaveCycleQueue);
+    */
+  }
+  
 
     fps++;
-
 
     const current = performance.now();
     past = current;
     const gap1 = current-startTime;
-    //console.log("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:green; color:white");
+
+    //saveEmulLog("[GAP1]        {s_____e}   = " + gap1.toFixed(3) + " loopCnt: " + loopCnt);
+
+    //updateCount++;
+    /*
+    if(gap1 > 16.74) {
+      console.log(`%c[GAP1]        {s_____e}   = ${gap1.toFixed(3)},  ${slaveBlobArrayBufferSize}`, "background:red;");
+    } else {
+      console.log(`%c[GAP1]        {s_____e}   = ${gap1.toFixed(3)}, ${slaveBlobArrayBufferSize}`, "background:green;");
+    }
     saveEmulLog("[GAP1]        {s_____e}   = " + gap1.toFixed(3));
+    */
 
+    //console.log(`%c[GAP1]        {s_____e}   = ${gap1.toFixed(3)}`, "background:red;");
 
-    if(fps > 59) {
-      saveLog(fps + " fps over 59, reset old delay 0");
+  
+    if(fps > 59) { //  if(gap1 > 16.74) {
+       saveLog(fps + " fps over 59, reset old delay 0");
       isInitUpdate = true; // reset delay
     }
-    
-    /*
-    if(isInitUpdate) {
-      console.log("init");
-      isInitUpdate = false;
-      next = current;
-      delayGap = Display.frameInterval - gap1;
-    } else {
 
-      // amortized
-      next += Display.frameInterval; //next += 16.74 or 8.37
-      delayGap = next - current;
-    
-                            // not amortized
-                            /*
-                            if((delayGap > 0) && (gap0 > delayGap)) {
-                              delayGap = Display.frameInterval - (gap0 - delayGap) - gap1;
-                            } else {
-                              delayGap = Display.frameInterval - gap1;
-                            }
-                            */
-    //}
-    
 
     if(!setFirstNext) {
       setFirstNext = true;
@@ -371,16 +407,28 @@ function noDelayUpdate() {
       setTimeout(noDelayUpdate, delayGap);
       return;
     }
+
+    /*
+    const intervalPoint = Math.floor((current-firstNext)/Display.frameInterval) * Display.frameInterval + firstNext;
+    if((current - next) >= (intervalPoint + Display.frameInterval - current)) {
+      isInitUpdate = true;
+    }
+    */
   
+    /*
     if(isInitUpdate) {
       console.log("init");
       isInitUpdate = false;
-      next = Math.floor((current-firstNext)/_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval)*_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval + firstNext;
+      next = Math.floor((current-firstNext)/Display.frameInterval) * Display.frameInterval + firstNext;
+      //next = intervalPoint;
+    }
+    */
+    if(isInitUpdate) {
+      return;
     }
      
     next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
     delayGap = next - current;
-
 
     self.postMessage({ // recvQ
       msg: 'M',
@@ -389,433 +437,167 @@ function noDelayUpdate() {
     });
 }
 
-
-function oldUpdate() {
-  const startTime = performance.now();
-    const gap0 = startTime - past;
-    saveLog("%c [GAPx]    e}_ {s     e}   = " + pastGap.toFixed(3), "background:blue; color:white");
-    saveLog("%c [GAP0] {  e}__{s      }   = " + gap0.toFixed(3), "background:red; color:white");
-    if(pastGap > 0) {
-        saveLog("%c [GAPr]    e} _{s     e}   = " + (gap0-pastGap).toFixed(3), "background:green; color:white");
-    } else {
-        saveLog("%c [GAPr]    e} _{s     e}   = " + (gap0).toFixed(3), "background:green; color:white");
-    }
-
-    if (paused || !running) {
-        return;
-    }
-    if (gb.cartridge.hasRTC) {
-        gb.cartridge.rtc.updateTime();
-    }
-    while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-        try {
-            cycles += gb.cycle();
-        } catch (error) {
-            console.error(error);
-            running = false;
-            return;
-        }
-    }
-    cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-
-    fps++;
-
-    const current = performance.now();
-    const gap1 = current-startTime;
-    let nextGap;
-
-    
-    if(isInitUpdate) {
-      isInitUpdate = false;
-      next = current;
-      nextGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval-gap1;
-    } else {
-      next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
-      nextGap = next - current;
-    }
-    
-
-    // origin
-    //next += Display.frameInterval; //next += 16.74 or 8.37
-    //nextGap = next - current;
-    //
-
-
-    saveLog("%c [GAP1]        {s_____e}   = " + gap1.toFixed(3), "background:orange; color:black");
-    saveLog("%c [GAP4]        {s     e}___= " + nextGap.toFixed(3), "color:blue");
-
-    past = current;
-
-    pastGap = nextGap;
-    
-    setTimeout(oldUpdate, nextGap);
-}
-
-let lastTime;
-function paint(callTime) {
-  saveLog("%c [GAP$] {s__}___{e  }   = " + (callTime - lastTime).toFixed(3), "background:green; color:white");
-  lastTime = callTime;
-
-  /*
-  const startTime = performance.now();
-  const gap0 = startTime - past;
-  saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
-  */
-  
-
-  if (paused || !running) {
-    return;
-  }
-  if (gb.cartridge.hasRTC) {
-    saveLog("%c RTC " , "background:black; color:white");
-    gb.cartridge.rtc.updateTime();
-  }
-
-  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-    try {
-      cycles += gb.cycle();
-    } catch (error) {
-      console.error(error);
-      running = false;
-      return;
-    }
-  }
-  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-
-  fps++;
-
-  /*
-  const current = performance.now();
-  const gap1 = current - startTime;
-  past = current;
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  */
-  
-
-  requestAnimationFrame(paint);
-}
-
-
-function updateOG() {
-  const startTime = performance.now();
-  const gap0 = startTime - past;
-  saveLog("%c [GAP0] s}____{e    }   = " + gap0.toFixed(3), "background:red; color:white");
-
-  if (paused || !running) {
-    return;
-  }
-  if (gb.cartridge.hasRTC) {
-    gb.cartridge.rtc.updateTime();
-  }
-
-  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-    try {
-      cycles += gb.cycle();
-    } catch (error) {
-      console.error(error);
-      running = false;
-      return;
-    }
-  }
-  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-
-  fps++;
-
-
-
-
-
-
-  /**
-         'loadAndStart'   'setTimeout'
-      next  : now,         now+16.74,         // ideal lap time
-      before: now,   now+x            now+y,
-
-
-     =========|=========|
-      (     )   (    )
-            <--       <--
-
-      updateGap = next - current
-     
-   */
-  /*
-  const current = performance.now();
-  const gap1 = current-startTime;
-  let updateGap;
-  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정
-    isInitUpdate = false;
-    next = current;
-    updateGap = Display.frameInterval-gap1;
-  } else {
-    next += Display.frameInterval; // +16.74ms
-    updateGap = next - current;
-  }
-  past = current;
-
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  saveLog("%c [GAPu] s}    {    e}<--= " + updateGap.toFixed(3), "background:green; color:white");
-  
-  setTimeout(() => update(), updateGap);
-*/
-
-
-
-  /*
-   const current = performance.now();
-   const setTimeoutGap = current-past;
-   past = current;
-   const updateGap = Display.frameInterval - setTimeoutGap;
-
-   saveLog("%c [GAP1]        {s-----e}   = " + (current-startTime).toFixed(3), "background:orange; color:black");
-   saveLog("%c [GAP2] {  s}--{------e}   = "+ setTimeoutGap.toFixed(3), "background:yellow; color:black");
-   saveLog("%c [GAP3} {  s--16.74---e}   = "+ updateGap.toFixed(3), "background:green; color:white");
-   */
-
-
-
-/**
- *   (       )                (      )
- * 
- *           _________.........______xxxxx
- * 
- *           <------->                       oldUpdateGap     
- *           <----------------->             gap0
- *                             <----->       gap1
- *           <----------------------->       gap2
- *                                   <--->   updateGap
- *                    <------->              realDelay
- */
-
-  /**
-   * 
-   *                          if oldUpdateGap <= gap0
-   *                               (    )    (     )
-   *                                   <-->....
-   *                                   <------>
-   *                                updateGap = 16.74 - (gap0 - oldUpdateGap) - gap1;
-   *                          else
-   *                               (    )    (     )
-   *                                   <-------->
-   *                                   <------>
-   *                                updateGap = 16.74 -         0             - gap1;
-   * 
-   * 
-   *    if oldUpdateGap <= 0 (already over 16.74), then take 4ms gap0 as default delay of mine.
-   * 
-   */
-  
-  const current = performance.now();
-  const gap1 = current - startTime;
-  const gap2 = current - past;
-  const realDelay = oldUpdateGap > gap0 ? 0 : gap0 - oldUpdateGap;
-  
-  let updateGap;
-  if(isInitUpdate) {  // load ---3000ms--> 첫 update, 갭 벌어지는 것 보정
-    isInitUpdate = false;
-    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
-  } else {
-    //updateGap = Display.frameInterval - gap2 + oldUpdateGap;  //Display.frameInterval - (gap0 - oldUpdateGap) - gap1;
-    updateGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - realDelay - gap1;
-  }
-
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  //saveLog("%c [GAP2] s}____{____e}   = " + gap2.toFixed(3), "background:yellow; color:black");
-  saveLog("%c [GAP2] s}  __{    e}   = " + realDelay.toFixed(3), "background:yellow; color:black");
-  saveLog("%c [GAP3] s}__  {    e}   = " + oldUpdateGap.toFixed(3), "background:green; color:white");
-  saveLog("%c [GAP4] s}    {s   e}__ = " + updateGap.toFixed(3), "background:blue; color:white");
-
-  if(updateGap < 0) {
-    updateGap = 0;
-  }
-  oldUpdateGap = updateGap;
-  past = current;
-
-
-  setTimeout(() => update(), updateGap);
-  
-
-
-  /** 
-      setInterval
-  */
-  /*
-  const current = performance.now();
-  const gap1 = current - startTime;
-  past = current;
-  saveLog("%c [GAP1]       {s___e}   = " + gap1.toFixed(3), "background:orange; color:black");
-  */
-  
-  
-}
-
 let printOld;
+let restartUpdate = false;
 
 function printFps() {
   const current = performance.now();
-
- /*
-  save the int value to setIntGap
- */
   const setIntGap = (current - printOld).toFixed(0);
   const letter = fps + " " + _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps + " " + setIntGap;
   let isSame = true;
   if(fps !== _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps) {
     isSame = false; 
   } 
-  self.postMessage({msg: 'F', payload: letter, time:isSame});
+  //self.postMessage({msg: 'F', payload: letter, time:isSame});
+  //self.postMessage({msg: 'F', payload: fps, time:true});
+
+  //console.log(`master FPS: ${masterFps}, slave FPS: ${slaveFps}`);
+  const dualFps = fps + " " + masterFps + " " + slaveFps;
+  //console.log(`master renderCpuCycles: ${gb.display.renderCpuCycles}, slave : ${gbSlave.display.renderCpuCycles}`);
+
+  self.postMessage({msg: 'F', payload: dualFps, time:true});
 
   saveLog("%c FPS= " + letter, "background:cyan; color:black");
-  saveLog("%c 1 sec= " + setIntGap,
-      "background:cyan; color:red");
-  _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.fps = 0;
+  saveLog("%c 1 sec= " + setIntGap, "background:cyan; color:red");
+
+  //saveEmulLog("updateCount " + fps + " masterFPS: " + masterFps + " slaveFPS: " + slaveFps);
+  //console.log(letter);
+
+  masterFps = 0;
+  slaveFps = 0;
+  //Display.fps = 0;
   fps = 0;
   printOld = current;
+
+
+  if(isInitUpdate) {
+    console.log("init");
+    isInitUpdate = false;
+    next = Math.floor((current-firstNext)/_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval) * _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval + firstNext;
+    next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval;
+    delayGap = next - current;
+    setTimeout(noDelayUpdate, delayGap);
+  }
 }
 
 let fpsInterval;
+let blobIdx = 0;
+let slaveBlobArrayBufferSize = 0;
 
-function loadAndStart(payload) {
-  let rom = payload.uInt8Array;
-  gb = new _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy(payload.flagSharedBuffer,
-      payload.sbSharedBuffer,
-      payload.scSharedBuffer,
-      payload.transferTriggerSharedBuffer,
-      payload.useInternalClockSharedBuffer,
-      payload.sharedBuffer,
-      payload.timingBuffer,
-      payload.waitScBuffer,
-      payload.keySharedBuffer,
-      payload.scDirtySharedBuffer,
-      payload.scMonitorStartSharedBuffer,
-      payload.soundLeftSab,
-      payload.soundRightSab,
-      payload.fillSab,
-      payload.bufferLen);
-  gb.setMessenger(self);
+let masterFps = 0;
+let slaveFps = 0;
+
+let masterFpsPeriod = 0;
+let slaveFpsPeriod = 0;
+
+
+function loadAndStart(rom, masterContext, slaveContext, bufferLen) {
+  gb = new _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy(
+    masterContext.keySharedBuffer,
+    masterContext.soundLeftSab,
+    masterContext.soundRightSab,
+    masterContext.soundFilledSab,
+    bufferLen
+  );
+  gb.display.setImageData(_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx.createImageData(_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth, _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight));
+  gb.display.renderFrameCallback = (imageData) => { 
+    //const current = performance.now();
+    _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx.putImageData(imageData, 0, 0);
+    //saveEmulLog("master putImage");
+    //console.log(`%cmaster putImage ${(current - masterFpsPeriod).toFixed(3)}`, "background:orange");
+    //masterFpsPeriod = current;
+    masterFps++;
+  }
+
+  gb.name = 'MASTER';
+
+  if(multiPlay) {
+    gbSlave = new _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy(
+      slaveContext.keySharedBuffer,
+      slaveContext.soundLeftSab,
+      slaveContext.soundRightSab,
+      slaveContext.soundFilledSab,
+      bufferLen
+    );
+    gbSlave.display.setImageData(_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCtx.createImageData(_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth, _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight));
+    gbSlave.display.renderFrameCallback = (imageData) => { 
+      //const current = performance.now();
+      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCtx.putImageData(imageData, 0, 0);
+      //saveEmulLog("slave putImage");
+      //console.log(`%cslave putImage ${(current - slaveFpsPeriod).toFixed(3)}`, "background:brown;color:white");
+      //slaveFpsPeriod = current;
+      slaveFps++;
+
+      try {
+        _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.convertToBlob({ type: 'image/png' }).then((blob) => 
+          {
+            blobIdx++;
+            //console.log(`%c blob: ${blob.size}, convertToBlob lap: ${(performance.now() - current).toFixed(3)}, blobIdx: ${blobIdx}`, "background:cyan;");
+
+          // Convert Blob to ArrayBuffer
+              blobToArrayBuffer(blob).then((arrayBuffer) => {
+                // Now you have the ArrayBuffer, you can use it as needed
+                //console.log('ArrayBuffer size:', arrayBuffer.byteLength);
+                
+                // Post the ArrayBuffer if needed
+                slaveBlobArrayBufferSize = arrayBuffer.byteLength;
+
+                self.postMessage({
+                    msg: 'img',
+                    payload: arrayBuffer,
+                    time: blobIdx
+                });
+            }).catch(error => {
+                console.error("ArrayBuffer conversion failed:", error);
+            });
+          }
+        );
+      } catch(error) {
+        console.error("Blob creation failed:", error);
+      }
+    };
+
+    gbSlave.name = 'SLAVE';
+    gbSlave.connectedGb = gb;
+    gb.connectedGb = gbSlave;
+  }
+
+
   try {
-    gb.cartridge.load(rom);
-    running = true;
-    past = performance.now();
-    cycles = 0;
-    saveLog("load");
-
-    next = past;
-
-    //update();
-    //oldUpdate();
-
-    noDelayUpdate();
-
-    //setInterval(() => update(), Display.frameInterval);
-
-    //requestAnimationFrame(paint);
-
-    printOld = past;
-    fpsInterval = setInterval(() => printFps(), 1000);
+    
+    gb.cartridge.load(rom, masterContext.ram, masterContext.rtc);
+    if(multiPlay) {
+      gbSlave.cartridge.load(rom, slaveContext.ram, slaveContext.rtc);
+    }
+    playGame();
   } catch (error) {
     console.error(error);
   }
 }
 
-let setFirstNext = false;
-let firstNext = 0;
 
-function update() {
-  const startTime = performance.now();
-
-  if (paused || !running) {
-      return;
-  }
-  if (gb.cartridge.hasRTC) {
-      gb.cartridge.rtc.updateTime();
-  }
-  while (cycles < _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame) {
-      try {
-          cycles += gb.cycle();
-      } catch (error) {
-          console.error(error);
-          running = false;
-          return;
-      }
-  }
-  cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
-  const current = performance.now();
-  
-  fps++;
-
-  if(fps > 59) {
-    isInitUpdate = true; // reset delay
-  }
-  
-  const gap1 = current-startTime;
-
-  /**
-   *   never init
-   * 
-   */
-  isInitUpdate = false;
-
-  
-  if(isInitUpdate) {
-    console.log("init");
-    isInitUpdate = false;
-
-    next = current;
-    delayGap = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval - gap1;
-  } else{
-    next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval; //next += 16.74 or 8.37
-    delayGap = next - current;
-  }
-  
-
-  /*
-  if(!setFirstNext) {
-    setFirstNext = true;
-    firstNext = current;
-    next = current;
-    delayGap = Display.frameInterval - gap1;
-    isInitUpdate = false;
-    setTimeout(update, delayGap);
-    return;
-  }
-
-  if(isInitUpdate) {
-    console.log("init");
-    isInitUpdate = false;
-    next = Math.floor((current-firstNext)/Display.frameInterval)*Display.frameInterval + firstNext;
-  }
-  
-  next += Display.frameInterval; //next += 16.74 or 8.37
-  delayGap = next - current;
-  */
-  setTimeout(update, delayGap);
+// Helper function to convert Blob to ArrayBuffer
+function blobToArrayBuffer(blob) {
+  return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(blob);
+  });
 }
 
-    /**
-     *                                        next=current
-     *                                         |-------|-------|
-     *    |----g--|----g--|----g--|----g--|xxxxg--|-------|-------|
-     */
-    /**
-     *  1. delayGap 이 벌어지는 걸(채무 늘어나는 것) 초기화하려고 한 로직?
-     *     아니다. speed 줄이려고 만든 로직이다. 즉, delayGap 청산 하고 새로 시작.
-     * 
-     *  2. next 위치 초기화 하는 거랑 속도 제한이랑(fps > 59 로 측정) 무슨 상관인가?
-     *     delayGap 청산 하고 새로 시작.
-     *     
-     *  3. delayGap 만 날려버리면 될텐데. next 기준점은 옮기지 않고.
-     *     하지만 now() 와 next + 16.74*n 을 가지고 어떻게 지금 위치로 next + 16.74*x 복귀시키지?
-     *     --> next -= 16.74*y
-     *   
-     *         next = firstNext + 16.74*y
-     *         y = (now()-firstNext)/16.74
-     *     
-     *  4. 질주시켜도 delayGap 상환 다 안 되나? 아, fps 59(59번)으론 상환하기 부족하구나.
-     *     
-     *  5. sound.js에서 (this.nextPush - now) 갭 차이가 점점 커졌던거는 
-     *     위의 next=current 를 반복 해주는 동안 점점 기준점이 단축되기 때문?
-     */
+
+function playGame() {
+  Atomics.store(runningState, 0, 1);
+  past = performance.now();
+  cycles = 0;
+  slaveCycles = 0;
+  next = past;
+  noDelayUpdate();
+  printOld = past;
+  fpsInterval = setInterval(() => printFps(), 1000);
+}
+
 
 /***/ }),
 
@@ -829,6 +611,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   Cartridge: () => (/* binding */ Cartridge)
 /* harmony export */ });
+/* harmony import */ var _rtc_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./rtc.js */ "./public/js/gb/rtc.js");
+
+
 class Cartridge {
     constructor(gb) {
         this.gb = gb;
@@ -1148,7 +933,7 @@ class Cartridge {
         }
     }
 
-    load(file) {
+    load(file, uploadedRam, uploadedRtc) {
         this.title = new TextDecoder('ascii').decode(file.slice(0x134, 0x144));
 
         const cgb = file[0x143];
@@ -1232,15 +1017,9 @@ class Cartridge {
 
         const ramSize = file[0x149];
         if (this.hasRAM) {
-            /**
-             * this cartridge type
-             * does not directly access localStorage from webworker
-             */
-            /*
-            if (this.hasBattery && this.title in localStorage) {
-                this.ram = new Uint8Array(localStorage[this.title].split(',').map(parseFloat));
+            if (this.hasBattery && (uploadedRam != null)) {
+                this.ram = new Uint8Array(Object.values(uploadedRam).map(parseFloat));
             } else {
-             */
                 switch (ramSize) {
                     case 0x00:
                         break;
@@ -1259,25 +1038,32 @@ class Cartridge {
                     default:
                         throw 'unknown RAM size: 0x' + ramSize.toString(16);
                 }
-            //}
+            }
         }
         if (this.hasRTC) {
-            if (this.hasBattery && (this.title + 'TIME') in localStorage) {
-                this.rtc = new RTC();
-                Object.assign(this.rtc, JSON.parse(localStorage[this.title + 'TIME']));
+            if (this.hasBattery && (uploadedRtc != null)) {
+                this.rtc = new _rtc_js__WEBPACK_IMPORTED_MODULE_0__.RTC();
+                Object.assign(this.rtc, uploadedRtc);
             } else {
-                this.rtc = new RTC();
+                this.rtc = new _rtc_js__WEBPACK_IMPORTED_MODULE_0__.RTC();
             }
         }
     }
 
     save() {
-        if (this.hasRAM && this.hasBattery) {
-            localStorage[this.title] = this.ram;
+        let savedRam = '';
+        if(this.hasRAM && this.hasBattery) {
+            savedRam = this.ram;
         }
-        if (this.hasRTC && this.hasBattery) {
-            localStorage[this.title + 'TIME'] = JSON.stringify(this.rtc);
+        let savedRtc = '';
+        if(this.hasRTC && this.hasBattery) {
+            savedRtc = this.rtc;
         }
+        self.postMessage({msg: 'saveData', payload: {
+            title: this.title,
+            ram: savedRam,
+            rtc: savedRtc
+            }, time: -1});
     }
 }
 
@@ -1300,39 +1086,30 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _serial_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./serial.js */ "./public/js/gb/serial.js");
 /* harmony import */ var _sound_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./sound.js */ "./public/js/gb/sound.js");
 /* harmony import */ var _timer_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./timer.js */ "./public/js/gb/timer.js");
-/* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ../../dummylogger.js */ "./public/dummylogger.js");
-/* harmony import */ var _emulworker_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ../emulworker.js */ "./public/js/emulworker.js");
+/* harmony import */ var _emulworker_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ../emulworker.js */ "./public/js/emulworker.js");
  // Adjust the import based on the actual exports
 
 
 
 
 
- // Adjust based on actual exports
 
 
 class GameBoy {
-  constructor(flagSharedBuffer, sbSharedBuffer, scSharedBuffer,
-      transferTriggerSharedBuffer,
-      useInternalClockSharedBuffer,
-      sharedBuffer,
-      timingBuffer,
-      waitScBuffer,
+  
+  constructor(
       keySharedBuffer,
-      scDirtySharedBuffer,
-      scMonitorStartSharedBuffer,
       soundLeftSab,
       soundRightSab,
       fillSab,
-      bufferLen) {
-    this.display = new _display_js__WEBPACK_IMPORTED_MODULE_1__.Display(this);
+      bufferLen,
+    ) {
+    this.display = new _display_js__WEBPACK_IMPORTED_MODULE_1__.Display(this); 
     this.timer = new _timer_js__WEBPACK_IMPORTED_MODULE_5__.Timer(this);
     this.joypad = new _joypad_js__WEBPACK_IMPORTED_MODULE_2__.Joypad(this, keySharedBuffer);
     this.cartridge = new _cartridge_js__WEBPACK_IMPORTED_MODULE_0__.Cartridge(this);
     this.sound = new _sound_js__WEBPACK_IMPORTED_MODULE_4__.Sound(this, soundLeftSab, soundRightSab, fillSab, bufferLen);
-    this.serial = new _serial_js__WEBPACK_IMPORTED_MODULE_3__.Serial(this, sbSharedBuffer, scSharedBuffer,
-        transferTriggerSharedBuffer,
-        useInternalClockSharedBuffer, sharedBuffer);
+    this.serial = new _serial_js__WEBPACK_IMPORTED_MODULE_3__.Serial(this);
 
     this.a = 0;
     this.fz = false;
@@ -1352,8 +1129,7 @@ class GameBoy {
 
     this.halt = false;
 
-    //this._if = 0;
-    this._if = new Int32Array(flagSharedBuffer);
+    this._if = 0;
 
     this._ie = 0;
 
@@ -1369,33 +1145,24 @@ class GameBoy {
     this.hram = new Uint8Array(0x7f);
 
     this.cgb = false;
+    
     this.cycles = 0;
-
-    this._waitForIO = false;
-
-    this._timing = new Int32Array(timingBuffer);
-
-    this._messenger = null;
-
-    this._lock = new Int32Array(sharedBuffer);
-
-    this._waitForSc = new Int32Array(waitScBuffer);
-
-    this._scDirty = new Int32Array(scDirtySharedBuffer);
-
-    this._scMonitor = new Int32Array(scMonitorStartSharedBuffer);
   }
 
-  get waitForIO() {
-    return this._waitForIO;
+  get name() {
+    return this._name;
   }
 
-  set waitForIO(value) {
-    this._waitForIO = value;
+  set name(name) {
+    this._name = name;
   }
 
-  get timing() {
-    return this._timing;
+  get connectedGb() {
+    return this._connectedGb;
+  }
+
+  set connectedGb(connectedGb) {
+    this._connectedGb = connectedGb;
   }
 
   get f() {
@@ -1513,14 +1280,16 @@ class GameBoy {
   }
 
   get if() {
-    //return 0xe0 | this._if[0];
-    return 0xe0 | Atomics.load(this._if, 0);
+    return 0xe0 | this._if;
   }
 
   set if(value) {
-    //this._if[0] = value & GameBoy.interrupts;
-    //Atomics.store(this._if, 0, value & GameBoy.interrupts);
-    Atomics.or(this._if, 0, value & GameBoy.interrupts);
+    const before = value;
+    this._if = value & GameBoy.interrupts;
+
+    if((before & GameBoy.serialInterrupt) != 0) {
+      this.requestInterrupt(GameBoy.serialInterrupt);
+    }
   }
 
   get ie() {
@@ -1531,20 +1300,12 @@ class GameBoy {
     this._ie = value & GameBoy.interrupts;
   }
 
-  setMessenger(messenger) {
-    this._messenger = messenger;
-    this.serial.messenger = messenger;
-    this.sound.messenger = messenger;
-  }
-
   requestInterrupt(interrupt) {
-    //this._if[0] |= interrupt;
-    Atomics.or(this._if, 0, interrupt);
+    this._if |= interrupt;
   }
 
   clearInterrupt(interrupt) {
-    //this._if[0] &= ~interrupt;
-    Atomics.and(this._if, 0, ~interrupt);
+    this._if &= ~interrupt;
   }
 
   callInterrupt(address) {
@@ -1580,11 +1341,11 @@ class GameBoy {
       case 0x0:
       case 0x1:
       case 0x2:
-      case 0x3:
+      case 0x3: //  6       011/0       0  ~ 7FFF 
         return this.cartridge.readROM(address & 0x7fff);
-      case 0x4:
+      case 0x4: //  8       100/0
         return this.display.readVRAM(address & 0x1fff);
-      case 0x5:
+      case 0x5: // A000 -> 101/0 0000 0000 0000
         return this.cartridge.readRAM(address & 0x1fff);
       case 0x6:
         return this.readWRAM(address & 0x1fff);
@@ -1603,11 +1364,8 @@ class GameBoy {
               case 0x00:
                 return this.joypad.p1;
               case 0x01:
-                //customLog("[get sb by cpu] ");
                 return this.serial.sb;
               case 0x02:
-                //saveEmulLog("read ff02: " + this.serial.sc);
-                //customLog("[get sc by cpu] ");
                 return this.serial.sc;
               case 0x04:
                 return this.timer.div;
@@ -1705,27 +1463,10 @@ class GameBoy {
                 this.joypad.p1 = value;
                 break;
               case 0x01:
-                //customLog("[set sb by cpu] ");
                 this.serial.sb = value;
                 break;
               case 0x02:
-                //saveEmulLog("ff02: " + value);
-                //customLog("[set sc by cpu] ");
                 this.serial.sc = value;
-
-                if ((value | 0x7E) === 0xFE) {
-                  Atomics.store(this._waitForSc, 0, 1);
-                  (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_6__.customLog)("update sc ", value);
-
-                  self.postMessage({msg: 'sc', payload: -1, time:-1});
-                  /*
-                  if(Atomics.load(this._scDirty, 0) === 1) {
-                    //Atomics.store(this._lock, 0, 1);
-                    //Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0
-                  }
-                   */
-                }
-
                 break;
               case 0x04:
                 this.timer.div = value;
@@ -2010,11 +1751,6 @@ class GameBoy {
   }
 
   cycle() {
-
-    Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0
-
-    //Atomics.add(this._timing, 0, 1);
-
     let cycles = 0;
     if ((this.ime || this.halt) && (this.ie & this.if) != 0) {
       this.halt = false;
@@ -2031,6 +1767,7 @@ class GameBoy {
           this.callInterrupt(0x0050);
         } else if ((this.ie & this.if & GameBoy.serialInterrupt) != 0) {
           this.clearInterrupt(GameBoy.serialInterrupt);
+          //saveEmulLog("jump from pc: " + this.pc);
           this.callInterrupt(0x0058);
         } else if ((this.ie & this.if & GameBoy.joypadInterrupt) != 0) {
           this.clearInterrupt(GameBoy.joypadInterrupt);
@@ -2042,13 +1779,17 @@ class GameBoy {
       cycles += (this.halt || this.display.hdmaOn) ? 1 : this.decode();
     }
 
-    let hardwareCycles = cycles; // cycles / (this.doubleSpeed ? 2 : 1);  왜 안 해주는지?  아래에서 display,sound 를 /2 만큼 느리게 돌려서 timer, serial을 상대적으로 빠르게 함.
+    return cycles;
+
+    /*
+    let hardwareCycles = cycles; // 아래에서 display,sound 를 /2 만큼 느리게 돌려서 timer, serial을 상대적으로 빠르게 함.
     while (hardwareCycles > 0) {
       this.timer.cycle();
       this.serial.cycle();
       hardwareCycles--;
     }
 
+    // -0.5 += 2.5
     this.cycles += cycles / (this.doubleSpeed ? 2 : 1); // /2 되면 절반만 도네?
     while (this.cycles > 0) {
       if (this.display.hdmaOn) {
@@ -2065,68 +1806,117 @@ class GameBoy {
     }
 
     return cycles / (this.doubleSpeed ? 2 : 1);
+    */
+  }
+
+  cycleOrigin() {
+    const instrCycles = this.cycle();
+    if(instrCycles == 0) {
+      //console.log("zero");
+    }
+    let hardwareCycles = instrCycles;
+    while (hardwareCycles > 0) {
+      this.hardwareCycle();
+      hardwareCycles--;
+    }
+
+    const result = this.getSpeedCycle(instrCycles);//instrCycles / (this.doubleSpeed ? 2 : 1);
+    this.cycles += result; // -0.5 += 2.5
+    while(this.cycles > 0) {
+      this.outputDeviceCycle();
+      this.cycles--;
+    }
+
+    this.checkHdmaTrigger();
+
+    return this.getSpeedCycle(instrCycles);
+  }
+
+  hardwareCycle() {
+    this.timer.cycle();
+    return this.serial.cycle();
+  }
+
+  getSpeedCycle(cycles) {  // 홀수면? 1 cycle 손해네?
+    return cycles / (this.doubleSpeed ? 2 : 1);
+  }
+
+  outputDeviceCycle() {
+    if (this.display.hdmaOn) {
+      this.runHdma();
+    }
+    this.display.cycle();
+    this.sound.cycle();
+  }
+
+  checkHdmaTrigger() {
+    if (this.display.hdmaTrigger) {
+      this.display.hdmaTrigger = false;
+      this.display.hdmaOn = true;
+    }
   }
 
   decode() {
     const instr = this.readAddress(this.pc++);
     let cycles = GameBoy.instrCycles[instr];
+    let instrName = "none";
     const quad = instr >> 6, op1 = (instr & 0x3f) >> 3, op2 = instr & 0x7;
     if (quad === 0) {
       if (op2 == 6) {
-        // LD r, n
+        instrName = " LD r, n"
         const imm = this.readAddress(this.pc++);
         this.writeRegister(op1, imm);
       } else if (op2 == 2) {
         if ((op1 & 0x1) != 0) {
-          // LD A, (rr)
+          instrName = " LD A, (rr)"
           this.a = this.readDoubleRegisterIndirect(op1 >> 1);
         } else {
-          // LD (rr), A
+          instrName = "/ LD (rr), A"
           this.writeDoubleRegisterIndirect(op1 >> 1, this.a);
         }
       } else if ((op1 & 0x1) == 0 && op2 == 1) {
-        // LD dd, nn
+       instrName = " LD dd, nn"
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         this.writeDoubleRegister(op1 >> 1, (imm2 << 8) | imm1);
       } else if (op1 == 1 && op2 == 0) {
-        // LD (nn), SP
+        instrName = " LD (nn), SP"
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         let address = (imm2 << 8) | imm1;
         this.writeAddress(address++, this.spl);
         this.writeAddress(address++, this.sph);
       } else if (op2 == 4) {
-        // INC r
+        instrName = " INC r"
         const tmp = (this.readRegister(op1) + 1) & 0xff;
         this.writeRegister(op1, tmp);
         this.fh = (tmp & 0xf) == 0;
         this.fn = false;
         this.fz = tmp == 0;
       } else if (op2 == 5) {
-        // DEC r
+        instrName = " DEC r"
         const tmp = (this.readRegister(op1) - 1) & 0xff;
         this.writeRegister(op1, tmp);
         this.fh = (tmp & 0xf) == 0xf;
         this.fn = true;
         this.fz = tmp == 0;
       } else if ((op1 & 0x1) != 0 && op2 == 1) {
-        // ADD HL, ss
+        instrName = " ADD HL, ss"
         const ss = this.readDoubleRegister(op1 >> 1);
         this.fc = this.hl + ss > 0xffff;
         this.fh = (this.hl & 0xfff) + (ss & 0xfff) > 0xfff;
         this.fn = false;
         this.hl += ss;
       } else if ((op1 & 0x1) == 0 && op2 == 3) {
-        // INC ss
+        instrName = " INC ss"
         this.writeDoubleRegister(op1 >> 1,
             this.readDoubleRegister(op1 >> 1) + 1);
       } else if ((op1 & 0x1) != 0 && op2 == 3) {
-        // DEC ss
+        instrName = " DEC ss"
         this.writeDoubleRegister(op1 >> 1,
             this.readDoubleRegister(op1 >> 1) - 1);
       } else if (op1 == 0 && op2 == 7) {
-        // RLCA
+        instrName = " RLCA"
         const carry = this.a & 0x80;
         this.a = ((this.a << 1) | (carry >> 7)) & 0xff;
         this.fc = carry != 0;
@@ -2134,7 +1924,7 @@ class GameBoy {
         this.fn = false;
         this.fz = false;
       } else if (op1 == 1 && op2 == 7) {
-        // RRCA
+        instrName = " RRCA"
         const carry = this.a & 0x1;
         this.a = ((carry << 7) | (this.a >> 1)) & 0xff;
         this.fc = carry != 0;
@@ -2142,7 +1932,7 @@ class GameBoy {
         this.fn = false;
         this.fz = false;
       } else if (op1 == 2 && op2 == 7) {
-        // RLA
+        instrName = " RLA"
         const carry = this.a & 0x80;
         this.a = ((this.a << 1) | this.fc) & 0xff;
         this.fc = carry != 0;
@@ -2150,7 +1940,7 @@ class GameBoy {
         this.fn = false;
         this.fz = false;
       } else if (op1 == 3 && op2 == 7) {
-        // RRA
+        instrName = " RRA"
         const carry = this.a & 0x1;
         this.a = ((this.fc << 7) | (this.a >> 1)) & 0xff;
         this.fc = carry != 0;
@@ -2158,18 +1948,18 @@ class GameBoy {
         this.fn = false;
         this.fz = false;
       } else if (op1 == 3 && op2 == 0) {
-        // JR e
+        instrName = " JR e"
         const offset = this.readAddress(this.pc++) << 24 >> 24;
         this.pc += offset;
       } else if ((op1 & 0x4) != 0 && op2 == 0) {
-        // JR cc, e
+        instrName = " JR cc, e"
         const offset = this.readAddress(this.pc++) << 24 >> 24;
         if (this.readCondition(op1 & 0x3)) {
           this.pc += offset;
           cycles += 1;
         }
       } else if (op1 == 4 && op2 == 7) {
-        // DAA
+        instrName = " DAA"
         let tmp = this.a;
         if (!this.fn) {
           if (this.fc || tmp > 0x99) {
@@ -2191,24 +1981,24 @@ class GameBoy {
         this.fz = (tmp & 0xff) == 0;
         this.a = tmp & 0xff;
       } else if (op1 == 5 && op2 == 7) {
-        // CPL
+        instrName = " CPL"
         this.a ^= 0xff;
         this.fh = true;
         this.fn = true;
       } else if (op1 == 0 && op2 == 0) {
-        // NOP
+        instrName = " NOP"
       } else if (op1 == 6 && op2 == 7) {
-        // SCF
+        instrName = " SCF"
         this.fc = true;
         this.fh = false;
         this.fn = false;
       } else if (op1 == 7 && op2 == 7) {
-        // CCF
+        instrName = " CCF"
         this.fc = !this.fc;
         this.fh = false;
         this.fn = false;
       } else if (op1 == 2 && op2 == 0) {
-        // STOP
+        instrName = " STOP"
         this.pc++;
         if (this.speedTrigger) {
           this.speedTrigger = false;
@@ -2217,16 +2007,16 @@ class GameBoy {
       }
     } else if (quad === 1) {
       if (op1 != 6 || op2 != 6) {
-        // LD r, r'
+        instrName = " LD r, r'"
         this.writeRegister(op1, this.readRegister(op2));
       } else {
-        // HALT
+        instrName = " HALT"
         this.halt = true;
       }
     } else if (quad === 2) {
       const r = this.readRegister(op2);
       if (op1 == 0) {
-        // ADD A, r
+        instrName = " ADD A, r"
         const tmp = this.a + r;
         this.fc = tmp > 0xff;
         this.fh = (this.a & 0xf) + (r & 0xf) > 0xf;
@@ -2234,7 +2024,7 @@ class GameBoy {
         this.fz = (tmp & 0xff) == 0;
         this.a = tmp & 0xff;
       } else if (op1 == 1) {
-        // ADC A, r
+        instrName = " ADC A, r"
         const carry = this.fc;
         const tmp = this.a + r + carry;
         this.fc = tmp > 0xff;
@@ -2243,7 +2033,7 @@ class GameBoy {
         this.fz = (tmp & 0xff) == 0;
         this.a = tmp & 0xff;
       } else if (op1 == 2) {
-        // SUB A, r
+        instrName = " SUB A, r"
         const tmp = this.a - r;
         this.fc = tmp < 0;
         this.fh = (this.a & 0xf) - (r & 0xf) < 0;
@@ -2251,7 +2041,7 @@ class GameBoy {
         this.fz = (tmp & 0xff) == 0;
         this.a = tmp & 0xff;
       } else if (op1 == 3) {
-        // SBC A, r
+        instrName = " SBC A, r"
         const carry = this.fc
         const tmp = this.a - r - carry;
         this.fc = tmp < 0;
@@ -2260,7 +2050,7 @@ class GameBoy {
         this.fz = (tmp & 0xff) == 0;
         this.a = tmp & 0xff;
       } else if (op1 == 4) {
-        // AND A, r
+        instrName = " AND A, r"
         const tmp = this.a & r;
         this.fc = false;
         this.fh = true;
@@ -2268,7 +2058,7 @@ class GameBoy {
         this.fz = tmp == 0;
         this.a = tmp;
       } else if (op1 == 5) {
-        // XOR A, r
+        instrName = " XOR A, r"
         const tmp = this.a ^ r;
         this.fc = false;
         this.fh = false;
@@ -2276,7 +2066,7 @@ class GameBoy {
         this.fz = tmp == 0;
         this.a = tmp;
       } else if (op1 == 6) {
-        // OR A, r
+        instrName = " OR A, r"
         const tmp = this.a | r;
         this.a |= r;
         this.fc = false;
@@ -2285,7 +2075,7 @@ class GameBoy {
         this.fz = tmp == 0;
         this.a = tmp;
       } else if (op1 == 7) {
-        // CP A, r
+        instrName = " CP A, r"
         const tmp = this.a - r;
         this.fc = tmp < 0;
         this.fh = (this.a & 0xf) - (r & 0xf) < 0;
@@ -2294,40 +2084,40 @@ class GameBoy {
       }
     } else if (quad === 3) {
       if (op1 == 6 && op2 == 2) {
-        // LD A, (C)
+        instrName = " LD A, (C)"
         this.a = this.readAddress(0xff00 | this.c);
       } else if (op1 == 4 && op2 == 2) {
-        // LD (C), A
+        instrName = " LD (C), A"
         this.writeAddress(0xff00 | this.c, this.a);
       } else if (op1 == 6 && op2 == 0) {
-        // LD A, (n)
+        instrName = " LD A, (n)"
         const imm = this.readAddress(this.pc++);
         this.a = this.readAddress(0xff00 | imm);
       } else if (op1 == 4 && op2 == 0) {
-        // LD (n), A
+        instrName = " LD (n), A"
         const imm = this.readAddress(this.pc++);
         this.writeAddress(0xff00 | imm, this.a);
       } else if (op1 == 7 && op2 == 2) {
-        // LD A, (nn)
+        instrName = " LD A, (nn)"
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         this.a = this.readAddress((imm2 << 8) | imm1);
       } else if (op1 == 5 && op2 == 2) {
-        // LD (nn), A
+        instrName = " LD (nn), A"
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         this.writeAddress((imm2 << 8) | imm1, this.a);
       } else if (op1 == 7 && op2 == 1) {
-        // LD SP, HL
+        instrName = " LD SP, HL"
         this.sp = this.hl;
       } else if ((op1 & 0x1) == 0 && op2 == 5) {
-        // PUSH qq
+        instrName = " PUSH qq"
         this.pushDoubleRegister(op1 >> 1);
       } else if ((op1 & 0x1) == 0 && op2 == 1) {
-        // POP qq
+        instrName = " POP qq"
         this.popDoubleRegister(op1 >> 1);
       } else if (op1 == 7 && op2 == 0) {
-        // LDHL SP, e
+        instrName = " LDHL SP, e"
         const offset = this.readAddress(this.pc++) << 24 >> 24;
         const tmp = this.sp + offset;
         this.fc = (this.sp & 0xff) + (offset & 0xff) > 0xff;
@@ -2336,7 +2126,7 @@ class GameBoy {
         this.fz = false;
         this.hl = tmp;
       } else if (op1 == 5 && op2 == 0) {
-        // ADD SP, e
+        instrName = " ADD SP, e"
         const offset = this.readAddress(this.pc++) << 24 >> 24;
         const tmp = this.sp + offset;
         this.fc = (this.sp & 0xff) + (offset & 0xff) > 0xff;
@@ -2345,7 +2135,7 @@ class GameBoy {
         this.fz = false;
         this.sp = tmp;
       } else if (op1 == 0 && op2 == 6) {
-        // ADD A, n
+        instrName = " ADD A, n"
         const imm = this.readAddress(this.pc++);
         const tmp = this.a + imm
         this.fc = tmp > 0xff;
@@ -2354,7 +2144,7 @@ class GameBoy {
         this.fz = (tmp & 0xff) == 0;
         this.a = tmp & 0xff;
       } else if (op1 == 1 && op2 == 6) {
-        // ADC A, n
+        instrName = " ADC A, n"
         const imm = this.readAddress(this.pc++);
         const carry = this.fc;
         const tmp = this.a + imm + carry
@@ -2364,7 +2154,7 @@ class GameBoy {
         this.fz = (tmp & 0xff) == 0;
         this.a = tmp & 0xff;
       } else if (op1 == 2 && op2 == 6) {
-        // SUB A, n
+        instrName = " SUB A, n"
         const imm = this.readAddress(this.pc++);
         const tmp = this.a - imm;
         this.fc = tmp < 0;
@@ -2373,7 +2163,7 @@ class GameBoy {
         this.fz = (tmp & 0xff) == 0;
         this.a = tmp & 0xff;
       } else if (op1 == 3 && op2 == 6) {
-        // SBC A, n
+        instrName = " SBC A, n"
         const imm = this.readAddress(this.pc++);
         const carry = this.fc;
         const tmp = this.a - imm - carry;
@@ -2383,7 +2173,7 @@ class GameBoy {
         this.fz = (tmp & 0xff) == 0;
         this.a = tmp & 0xff;
       } else if (op1 == 4 && op2 == 6) {
-        // AND A, n
+        instrName = " AND A, n"
         const imm = this.readAddress(this.pc++);
         const tmp = this.a & imm;
         this.fc = false;
@@ -2392,7 +2182,7 @@ class GameBoy {
         this.fz = tmp == 0;
         this.a = tmp;
       } else if (op1 == 5 && op2 == 6) {
-        // XOR A, n
+        instrName = " XOR A, n"
         const imm = this.readAddress(this.pc++);
         const tmp = this.a ^ imm;
         this.fc = false;
@@ -2401,7 +2191,7 @@ class GameBoy {
         this.fz = tmp == 0;
         this.a = tmp;
       } else if (op1 == 6 && op2 == 6) {
-        // OR A, n
+        instrName = " OR A, n"
         const imm = this.readAddress(this.pc++);
         const tmp = this.a | imm;
         this.fc = false;
@@ -2410,7 +2200,7 @@ class GameBoy {
         this.fz = tmp == 0;
         this.a = tmp;
       } else if (op1 == 7 && op2 == 6) {
-        // CP A, n
+        instrName = " CP A, n"
         const imm = this.readAddress(this.pc++);
         const tmp = this.a - imm;
         this.fc = tmp < 0;
@@ -2420,12 +2210,12 @@ class GameBoy {
       } else if (op1 == 1 && op2 == 3) {
         cycles += this.decode_cb();
       } else if (op1 == 0 && op2 == 3) {
-        // JP nn
+        instrName = " JP nn"
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         this.pc = (imm2 << 8) | imm1;
       } else if ((op1 & 0x4) == 0 && op2 == 2) {
-        // JP cc, nn
+        instrName = " JP cc, nn"
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         if (this.readCondition(op1 & 0x3)) {
@@ -2433,17 +2223,17 @@ class GameBoy {
           cycles += 1;
         }
       } else if (op1 == 5 && op2 == 1) {
-        // JP HL
+        instrName = " JP HL"
         this.pc = this.hl;
       } else if (op1 == 1 && op2 == 5) {
-        // CALL nn
+        instrName = " CALL nn"
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         this.writeAddress(--this.sp, this.pch);
         this.writeAddress(--this.sp, this.pcl);
         this.pc = (imm2 << 8) | imm1;
       } else if ((op1 & 0x4) == 0 && op2 == 4) {
-        // CALL cc, nn
+        instrName = " CALL cc, nn"
         const imm1 = this.readAddress(this.pc++);
         const imm2 = this.readAddress(this.pc++);
         if (this.readCondition(op1 & 0x3)) {
@@ -2453,36 +2243,44 @@ class GameBoy {
           cycles += 3;
         }
       } else if (op1 == 1 && op2 == 1) {
-        // RET
+        instrName = " RET"
         this.pc = this.readAddress(this.sp++);
         this.pc |= this.readAddress(this.sp++) << 8;
       } else if (op1 == 3 && op2 == 1) {
-        // RETI
+        instrName = " RETI"
         this.pc = this.readAddress(this.sp++);
         this.pc |= this.readAddress(this.sp++) << 8;
         this.ime = true;
+
+        //saveEmulLog("RETI pc: " + this.pc);
       } else if ((op1 & 0x4) == 0 && op2 == 0) {
-        // RET cc
+        instrName = " RET cc"
         if (this.readCondition(op1 & 0x3)) {
           this.pc = this.readAddress(this.sp++);
           this.pc |= this.readAddress(this.sp++) << 8;
           cycles += 3;
         }
       } else if (op2 == 7) {
-        // RST t
+        instrName = " RST t"
         this.writeAddress(--this.sp, this.pch);
         this.writeAddress(--this.sp, this.pcl);
         this.pc = op1 << 3;
       } else if (op1 == 6 && op2 == 3) {
-        // DI
+        instrName = " DI"
         this.ime = false;
       } else if (op1 == 7 && op2 == 3) {
-        // EI
+        instrName = " EI"
         this.ime = true;
       } else {
         throw 'unknown instruction: 0x' + instr.toString(16);
       }
     }
+
+    /*
+    if(cycles == 0) {// && (instrName !== " HALT")) {
+      console.log(this.name + " instr:" + instrName + " 0 cycles");
+    }
+    */
     return cycles;
   }
 
@@ -2639,9 +2437,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   Display: () => (/* binding */ Display)
 /* harmony export */ });
 /* harmony import */ var _cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./cpu.js */ "./public/js/gb/cpu.js");
-/* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../../dummylogger.js */ "./public/dummylogger.js");
 
- // Adjust based on actual exports
 
 class Display {
     constructor(gb) {
@@ -2712,12 +2508,27 @@ class Display {
         this.vram = new Uint8Array(0x4000);
         this.oam = new Uint8Array(0xa0);
 
-        this.imageData = Display.ctx.createImageData(Display.canvasWidth, Display.canvasHeight);
-        this.pixels = new Uint32Array(this.imageData.data.buffer);
+        //this.imageData = Display.ctx.createImageData(Display.canvasWidth, Display.canvasHeight);
+        //this.pixels = new Uint32Array(this.imageData.data.buffer);
         this.bgClear = new Uint8Array(Display.width);
         this.bgPriority = new Uint8Array(Display.width);
 
-        this.priorRenderLap = 0;
+        //this.priorRenderLap = 0;
+
+        this._renderCpuCycles = 0;
+    }
+
+    get renderCpuCycles() {
+        return this._renderCpuCycles;
+    }
+
+    setImageData(imageData) {
+        this.imageData = imageData;
+        this.pixels = new Uint32Array(this.imageData.data.buffer);
+    }
+
+    set renderFrameCallback(callback) { // Added setter for renderCallback
+        this._renderFrameCallback = callback; // Store the callback in a private variable
     }
 
     get lcdc() {
@@ -3021,6 +2832,26 @@ class Display {
                 }
             }
         }
+
+        /*
+        // Create a new ArrayBuffer to hold the address and the pixel data
+        const pixelCount = Display.width; // Number of pixels to copy
+        const combinedBufferSize = 4 + pixelCount * 4; // 4 bytes for the address + pixelCount * 4 bytes for pixel data
+        const combinedBuffer = new ArrayBuffer(combinedBufferSize);
+        
+        // Create a DataView to write the address and pixel data
+        const dataView = new DataView(combinedBuffer);
+        dataView.setUint32(0, address, true); // Write the address at the start of the buffer (little-endian)
+
+        // Manually copy pixel data from this.pixels to the combined buffer using DataView
+        for (let i = 0; i < pixelCount; i++) {
+            const pixel = this.pixels[address + i]; // Get the pixel from the original array
+            dataView.setUint32(4 + i * 4, pixel, true); // Write the pixel value at the correct offset (after the address)
+        }
+
+        // Pass the combined buffer to the callback
+        this._renderLineCallback(combinedBuffer);
+        */
     }
 
     renderLineColor() {
@@ -3138,18 +2969,20 @@ class Display {
 
     renderFrame() {
         //customLog("%c render before","background:blue; color:white")
-        Display.ctx.putImageData(this.imageData, 0, 0);
-        Display.fps++;
+        //Display.ctx.putImageData(this.imageData, 0, 0);
+        this._renderFrameCallback(this.imageData);
+   
         //customLog("GameBoy start time: ", GameBoy.startTime.toFixed(3));
-        const current = performance.now();
-        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_1__.customLog)("%c render after(" + Display.renderCpuCycles + "): " + (current - _cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime).toFixed(3),"background:black; color:white");
-        (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_1__.customLog)("renderLap: " + (current - this.priorRenderLap).toFixed(3));
-        this.priorRenderLap = current;
-        Display.renderCpuCycles = 0;
+        //const current = performance.now();
+        //customLog("%c render after(" + Display.renderCpuCycles + "): " + (current - GameBoy.startTime).toFixed(3),"background:black; color:white");
+        //customLog("renderLap: " + (current - this.priorRenderLap).toFixed(3));
+        //this.priorRenderLap = current;
+
+        this._renderCpuCycles = 0;
     }
 
     cycle() {
-        Display.renderCpuCycles++;
+        this._renderCpuCycles++;
 
         if (this.lcdOn) {
             this.lycMatch = this.ly == this.lyc;
@@ -3310,6 +3143,165 @@ class Joypad {
 
 /***/ }),
 
+/***/ "./public/js/gb/rtc.js":
+/*!*****************************!*\
+  !*** ./public/js/gb/rtc.js ***!
+  \*****************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   RTC: () => (/* binding */ RTC)
+/* harmony export */ });
+class RTC {
+    constructor() {
+        this.time = 0;
+
+        this._latch = false;
+
+        this.sec = 0;
+        this.min = 0;
+        this.hour = 0;
+        this.day = 0;
+        this.high = 0;
+
+        this.secLatch = 0;
+        this.minLatch = 0;
+        this.hourLatch = 0;
+        this.dayLatch = 0;
+        this.highLatch = 0;
+    }
+
+    set latch(value) {
+        const _latch = (value & 0x1) != 0;
+        if (!this._latch && _latch) {
+            this.secLatch = this.sec;
+            this.minLatch = this.min;
+            this.hourLatch = this.hour;
+            this.dayLatch = this.day;
+            this.highLatch = this.high;
+        }
+        this._latch = _latch;
+    }
+
+    get s() {
+        return this.secLatch;
+    }
+
+    set s(value) {
+        this.sec = value;
+    }
+
+    get m() {
+        return this.minLatch;
+    }
+
+    set m(value) {
+        this.min = value;
+    }
+
+    get h() {
+        return this.hourLatch;
+    }
+
+    set h(value) {
+        this.hour = value;
+    }
+
+    get dl() {
+        return this.dayLatch;
+    }
+
+    set dl(value) {
+        this.day = value;
+    }
+
+    get dh() {
+        return 0x3e | this.highLatch;
+    }
+
+    set dh(value) {
+        this.high = value;
+    }
+
+    updateTime() {
+        if ((this.high & 0x40) == 0) {
+            const cur = Math.floor(Date.now() / 1000);
+            while (this.time + 60 * 60 * 24 < cur) {
+                this.time += 60 * 60 * 24;
+                this.day++;
+                if (this.day == 256) {
+                    this.day = 0;
+                    if ((this.high & 0x1) != 0) {
+                        this.high |= 0x80;
+                    }
+                    this.high ^= 0x1;
+                }
+            }
+            while (this.time + 60 * 60 < cur) {
+                this.time += 60 * 60;
+                this.hour++;
+                if (this.hour == 24) {
+                    this.hour = 0;
+                    this.day++;
+                    if (this.day == 256) {
+                        this.day = 0;
+                        if ((this.high & 0x1) != 0) {
+                            this.high |= 0x80;
+                        }
+                        this.high ^= 0x1;
+                    }
+                }
+            }
+            while (this.time + 60 < cur) {
+                this.time += 60;
+                this.min++;
+                if (this.min == 60) {
+                    this.min = 0;
+                    this.hour++;
+                    if (this.hour == 24) {
+                        this.hour = 0;
+                        this.day++;
+                        if (this.day == 256) {
+                            this.day = 0;
+                            if ((this.high & 0x1) != 0) {
+                                this.high |= 0x80;
+                            }
+                            this.high ^= 0x1;
+                        }
+                    }
+                }
+            }
+            while (this.time < cur) {
+                this.time++;
+                this.sec++;
+                if (this.sec == 60) {
+                    this.sec = 0;
+                    this.min++;
+                    if (this.min == 60) {
+                        this.min = 0;
+                        this.hour++;
+                        if (this.hour == 24) {
+                            this.hour = 0;
+                            this.day++;
+                            if (this.day == 256) {
+                                this.day = 0;
+                                if ((this.high & 0x1) != 0) {
+                                    this.high |= 0x80;
+                                }
+                                this.high ^= 0x1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+/***/ }),
+
 /***/ "./public/js/gb/serial.js":
 /*!********************************!*\
   !*** ./public/js/gb/serial.js ***!
@@ -3320,71 +3312,38 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   Serial: () => (/* binding */ Serial)
 /* harmony export */ });
-/* harmony import */ var _dummylogger_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../../dummylogger.js */ "./public/dummylogger.js");
-/* harmony import */ var _emulworker_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../emulworker.js */ "./public/js/emulworker.js");
- // Adjust based on actual exports
+/* harmony import */ var _emulworker_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../emulworker.js */ "./public/js/emulworker.js");
+/* harmony import */ var _cpu_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./cpu.js */ "./public/js/gb/cpu.js");
+
 
 
 class Serial {
-  constructor(gb, sbSharedBuffer, scSharedBuffer, transferTriggerSharedBuffer,
-      useInternalClockSharedBuffer, sharedBuffer) {
+  constructor(gb) {
     this.gb = gb;
 
-    this._sb = new Int32Array(sbSharedBuffer);
-    this._sc = new Int32Array(scSharedBuffer);
+    this._sb = 0;
+    this._sc = 0;
 
-    this.transferTrigger = new Int32Array(transferTriggerSharedBuffer);
-
-    //this.transferRunning = false;
     this.transferInProgress = false;
-
-    //this.useInternalClock = false;
-    this.useInternalClock = new Int32Array(useInternalClockSharedBuffer);
 
     this.fastClock = false;
 
-    //this.cycleCounter = 0;
-    //this.cycles = 0;
     this.divider = 0;
-
-    this._messenger = null;
-
-    this._isReadySc = new Int32Array(scSharedBuffer);
-
-    //this.handleMessage = this.handleMessage.bind(this);
-    this._lock = new Int32Array(sharedBuffer);
-
-    this.serialCycle = 0;
-  }
-
-  set isReadySc(value) {
-    this._isReadySc[0] = value;
-  }
-
-  get isReadySc() {
-    return this._isReadySc[0];
-  }
-
-  set messenger(value) {
-    this._messenger = value;
   }
 
   get sb() {
-    const value = Atomics.load(this._sb, 0);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("<< get sb ", value);
-    return value;
+    //saveEmulLog("<< get sb ", this._sb);
+    return this._sb;
   }
 
   set sb(value) {
-    Atomics.store(this._sb, 0, value);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(">> set sb ", value);
+    //saveEmulLog(">> set sb ", value);
+    this._sb = value;
   }
 
   get sc() {
-    //return 0x7e | (this.transferRunning << 7) | this.useInternalClock[0];
-    const value = Atomics.load(this._sc, 0);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)("<< get sc ", value);
-    return (0x7e | value);
+    //saveEmulLog("<< get sc ", this._sc);
+    return (0x7e | this._sc);
   }
 
   set sc(value) {
@@ -3392,8 +3351,8 @@ class Serial {
         value = 128  0x 1000 0000
                 129  0x 1000 0001
      */
-    Atomics.store(this._sc, 0, value);
-    (0,_dummylogger_js__WEBPACK_IMPORTED_MODULE_0__.customLog)(">> set sc ", value);
+    this._sc =  value;
+    //saveEmulLog(">> set sc ", value);
 
     if ((value | 0x7E) === 0xFF) {
       this.transferInProgress = true;
@@ -3407,40 +3366,52 @@ class Serial {
     } else if ( clockSpeed === 0b0 ){
       Serial.transferTime = Serial.cpuCyclesPerCycle * 8;
       //console.log("normal: " + Serial.transferTime);
+    } else {
+      console.log("sc clockSpeed bit exception " + value);
     }
   }
 
   cycle() {
-    this.serialCycle++;
-
     if (this.transferInProgress) {
       if (++this.divider >= Serial.transferTime) {
         this.transferInProgress = false;
-        this._messenger.postMessage({
-          msg: 'Q',
-          payload: this._sb[0],
-          time: -1 //Atomics.load(this.gb.timing, 0)
-        });
-        //customLog("%c 104 serial cycle:" + this.serialCycle, "background:brown; color:white");
-        this.serialCycle = 0;
-        //customLog("++ serial blocked ", Atomics.load(this.gb.timing, 0));
-        Atomics.store(this._lock, 0, 1);
-        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)("++ serial store ");
-        Atomics.wait(this._lock, 0, 1); // Wait until lock is changed to 0
-        (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_1__.saveEmulLog)("-- serial released");
+        return this.exchange();
       }
     }
+
+    return false;
+  }
+
+  exchange() {
+    const masterSb = this.sb;
+    const slave = this.gb.connectedGb;
+    const slaveSb = slave.serial.sb;
+    
+    if(slave.serial.sc != 0xFE) { //& 0xFE) == 0) { // 1111 1110 ,, 0xFE
+      console.log(`%c ${this.gb.name} master sb: ${masterSb}, ${slave.name} slave sb: ${slaveSb}, slave sc: ${slave.serial.sc}`, "background:red");
+      return true;
+    }
+    
+    // master
+    this.sb = slaveSb;
+    this.sc &= 0x7F;
+    this.gb.requestInterrupt(_cpu_js__WEBPACK_IMPORTED_MODULE_1__.GameBoy.serialInterrupt);
+
+    // slave
+    slave.serial.sb = masterSb;
+    slave.serial.sc &= 0x7F;
+    slave.requestInterrupt(_cpu_js__WEBPACK_IMPORTED_MODULE_1__.GameBoy.serialInterrupt);
+
+    return false;
   }
 }
 
 Serial.frequency = 8192;
-Serial.cpuCyclesPerCycle = (4194304 / 4) / Serial.frequency;//GameBoy.frequency / Serial.frequency;
 Serial.transferTime = Serial.cpuCyclesPerCycle * 8;
-//Serial.cpuCyclesPerCycle = (GameBoy.frequency * 4) / Serial.frequency;
+Serial.cpuCyclesPerCycle = (4194304 / 4) / Serial.frequency;
 
 Serial.fastFrequency = 262144;
-Serial.cpuCyclesPerFastCycle = (4194304 / 4) / Serial.fastFrequency;//GameBoy.frequency / Serial.frequency;
-//Serial.cpuCyclesPerFastCycle = GameBoy.frequency / Serial.fastFrequency;
+Serial.cpuCyclesPerFastCycle = (4194304 / 4) / Serial.fastFrequency;
 
 
 /***/ }),
@@ -3488,15 +3459,17 @@ class Sound {
         this.bufferLeft = new Float32Array(soundLeftSab);
         this.bufferRight = new Float32Array(soundRightSab);
 
+        this.slaveBuffer = new Float32Array(Sound.bufferSamples * 2);
+
         this.filled = new Int32Array(fillSab);
         this.bufferLen = bufferLen;
         this.genCount = 0;
 
-        this._messenger = null;
-    }
+        this.limiter = (this.bufferLen * Sound.cyclesPerSample);
 
-    set messenger(value) {
-        this._messenger = value;
+        this.cnt = 0;
+
+        this.soundIdx = 0;
     }
 
     get nr10() {
@@ -3826,7 +3799,7 @@ class Sound {
     }
 
     genLFSR() {
-
+        /* zelda sound mode
         if(this.channel4CounterStep) {
             this.genCount++;
             if(this.genCount > 127 || this.genCount == 1) {
@@ -3834,7 +3807,7 @@ class Sound {
                 return;
             }
         }
-
+        */
         const tmp = ((this.channel4LFSR & 0x2) >> 1) ^ (this.channel4LFSR & 0x1);
         this.channel4LFSR = (tmp << 14) | (this.channel4LFSR >> 1);
         if (this.channel4CounterStep) {
@@ -4009,7 +3982,7 @@ class Sound {
                 this.channel1Index = (this.channel1Index + 1) % 8;
             }
             if (this.channel1Volume != 0) {
-                const signal = Sound.pulseTable[this.channel1Duty][this.channel1Index] * this.channel1Volume / 15;
+                const signal = Sound.pulseTable[this.channel1Duty][this.channel1Index] * this.channel1Volume / 15 * 2 - 1;
                 if (this.channel1LeftEnable) {
                     left += signal;
                 }
@@ -4025,7 +3998,7 @@ class Sound {
                 this.channel2Index = (this.channel2Index + 1) % 8;
             }
             if (this.channel2Volume != 0) {
-                const signal = Sound.pulseTable[this.channel2Duty][this.channel2Index] * this.channel2Volume / 15;
+                const signal = Sound.pulseTable[this.channel2Duty][this.channel2Index] * this.channel2Volume / 15 * 2 - 1;
                 if (this.channel2LeftEnable) {
                     left += signal;
                 }
@@ -4041,7 +4014,7 @@ class Sound {
                 this.channel3Index = (this.channel3Index + 1) % 32;
             }
             if (this.channel3Volume != 0) {
-                const signal = (this.channel3WaveTable[this.channel3Index] >> Sound.volumeShift[this.channel3Volume]) / 15;
+                const signal = (this.channel3WaveTable[this.channel3Index] >> Sound.volumeShift[this.channel3Volume]) / 15 * 2 - 1;
                 if (this.channel3LeftEnable) {
                     left += signal;
                 }
@@ -4056,13 +4029,14 @@ class Sound {
                 this.channel4FrequencyCounter += Sound.divisionRatios[this.channel4DivisionRatio] << this.channel4ShiftClockFrequency;
                 this.genLFSR();
             }
-
+            /* zelda sound mode
             if(this.channel4CounterStep && this.genCount > 127) {
                 this.genCount = 0;
             }
+            */
 
             if (this.channel4Volume != 0) {
-                const signal = (~this.channel4LFSR & 0b1) * this.channel4Volume / 15;
+                const signal = (~this.channel4LFSR & 0b1) * this.channel4Volume / 15 * 2 - 1;
                 if (this.channel4LeftEnable) {
                     left += signal;
                 }
@@ -4074,13 +4048,49 @@ class Sound {
         left *= (this.leftVolume + 1) / 8;
         right *= (this.rightVolume + 1) / 8;
 
-        const idx = (this.cycles / Sound.cyclesPerSample) % this.bufferLen;
-        this.bufferLeft[idx] = left / Sound.channelCount + Sound.ctxKeeper;
-        this.bufferRight[idx] = right / Sound.channelCount + Sound.ctxKeeper;
+        const samples = (this.cycles / Sound.cyclesPerSample);
+       
+        const idx = samples % this.bufferLen;
+        this.bufferLeft[idx] = left / Sound.channelCount;// + Sound.ctxKeeper;
+        this.bufferRight[idx] = right / Sound.channelCount;// + Sound.ctxKeeper;
+        
+
+        const slaveIdx = samples % Sound.bufferSamples;
+        this.slaveBuffer[slaveIdx] = left / Sound.channelCount;
+        this.slaveBuffer[slaveIdx + Sound.bufferSamples] = right / Sound.channelCount;
   
-        if(((this.cycles / Sound.cyclesPerSample) % Sound.bufferSamples) == (Sound.bufferSamples - 1)) {
-            const old = Atomics.add(this.filled, 0, Sound.bufferSamples);
+        /*
+        if(this.soundIdx == 0) {
+            console.log(this.cycles + " " + idx + " val:" + left / Sound.channelCount);
+            // idx == 7167 부터 넣음. 8191 까지.
+        }
+        */
+       // this.cnt++;
+       
+        if((samples % Sound.bufferSamples) == (Sound.bufferSamples - 1)) {
+            if(this.gb.name == 'MASTER') { // mute Master
+                /*
+                const halfLength = this.slaveBuffer.length / 2;
+                const sub = this.slaveBuffer.subarray(0, halfLength);
+                this.bufferLeft.set(sub, this.soundIdx);
+                this.bufferRight.set(this.slaveBuffer.subarray(halfLength), this.soundIdx);
+                
+                this.soundIdx = (this.soundIdx + Sound.bufferSamples) % this.bufferLen;
+                */
+                //throw new Error(`cycles: ${this.cycles}, idx: ${idx}, soundIdx: ${this.soundIdx}`);
+
+                const old = Atomics.add(this.filled, 0, Sound.bufferSamples);    
+            }
+            if(this.gb.name == 'SLAVE') {
+                self.postMessage({msg: 'sound', payload: this.slaveBuffer, time: -1});                
+            }
             //console.log("fill: " + (old + Sound.bufferSamples));
+            //console.log("fill sound " + (this.cnt));
+            //this.cnt = 0;
+        }
+
+        if(this.cycles >= this.limiter) {
+            this.cycles = this.cycles - this.limiter;
         }
     }
 
@@ -4261,9 +4271,6 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   OrderLock: () => (/* binding */ OrderLock)
 /* harmony export */ });
-const locked = 1;
-const unlocked = 0;
-
 /*
    INT_SIZE should be 2 to the power of n
    to use bitwise operation as modular operation.
@@ -4272,99 +4279,15 @@ const INT_SIZE = 32;
 const BIT_MOD = INT_SIZE - 1; 
 
 class OrderLock {
-  /**
-   * Instantiate Mutex.
-   * If opt_sab is provided, the mutex will use it as a backing array.
-   * @param {SharedArrayBuffer} opt_sab Optional SharedArrayBuffer.
-   */
-  /*
-  constructor(opt_sab, opt_queue_sab, opt_front, opt_end, opt_reserved) {
-    this._sab = opt_sab || new SharedArrayBuffer(4);
-    this._mu = new Int32Array(this._sab);
 
-    this._queue_sab = opt_queue_sab || new SharedArrayBuffer(4*(INT_SIZE));
-    this._queue = new Int32Array(this._queue_sab);
-
-    this._front_sab = opt_front || new SharedArrayBuffer(4);
-    this._end_sab = opt_end || new SharedArrayBuffer(4);
-
-    this._front = new Int32Array(this._front_sab);
-    this._end = new Int32Array(this._end_sab);
-
-    this._reserved_sab = opt_reserved || new SharedArrayBuffer(4*(INT_SIZE));
-    this._reserved = new Int32Array(this._reserved_sab);
-    Atomics.store(this._reserved, 0 , -1);
-  }
-  */
-
-  constructor(opt_sab, opt_order, opt_main, opt_worker, opt_dsab, opt_enter_order, opt_queue_sab, opt_front, opt_end, opt_reserved) {
-    this._sab = opt_sab || new SharedArrayBuffer(4);
-    this._mu = new Int32Array(this._sab);
-
+  constructor(opt_order) {
     this._order_buffer = opt_order || new SharedArrayBuffer(4*(INT_SIZE));
     this._order = new Int32Array(this._order_buffer);
     this._order[0] = 1;
-
-    this._main_buffer = opt_main || new SharedArrayBuffer(4*(INT_SIZE));
-    this._main = new Int32Array(this._main_buffer);
-
-    this._worker_buffer = opt_worker || new SharedArrayBuffer(4*(INT_SIZE));
-    this._worker = new Int32Array(this._worker_buffer);
-
-    this._dsab = opt_dsab || new SharedArrayBuffer(4);
-    this._door = new Int32Array(this._dsab);
-
-    this._enter_order_buffer = opt_enter_order || new SharedArrayBuffer(4*(INT_SIZE));
-    this._enter_order = new Int32Array(this._enter_order_buffer);
-    this._enter_order[0] = 1;
-
-    this._queue_sab = opt_queue_sab || new SharedArrayBuffer(4*(INT_SIZE));
-    this._queue = new Int32Array(this._queue_sab);
-
-    this._front_sab = opt_front || new SharedArrayBuffer(4);
-    this._end_sab = opt_end || new SharedArrayBuffer(4);
-
-    this._front = new Int32Array(this._front_sab);
-    this._end = new Int32Array(this._end_sab);
-
-    this._reserved_sab = opt_reserved || new SharedArrayBuffer(4*(INT_SIZE));
-    this._reserved = new Int32Array(this._reserved_sab);
-    this._reserved[0] = -1;
   }
-
-  /**
-   * Instantiate a Mutex connected to the given one.
-   * @param {OrderLock} mu the other Mutex.
-   */
+ 
   static connect(mu) {
-    //return new OrderLock(mu._sab, mu._queue_sab, mu._front_sab, mu._end_sab, mu._reserved_sab);
-    return new OrderLock(mu._sab, mu._order_buffer, mu._main_buffer, mu._worker_buffer, mu._dsab, 
-      mu._enter_order_buffer, mu._queue_sab, mu._front_sab, mu._end_sab, mu._reserved_sab);
-  }
-
-
-  //---------------------------------------------------------
-
-  lock() {
-    const enterId = this.getId();
-    for(;;) {
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          // get lock
-          return enterId;
-        }
-        Atomics.wait(this._mu, 0, locked);
-    }
-  }
-
-  spinLock() {
-    const enterId = this.getId();
-    for(;;) {
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          // get lock
-          return enterId;
-        }
-        //Atomics.wait(this._mu, 0, locked);
-    }
+    return new OrderLock(mu._order_buffer);
   }
 
   getId() {
@@ -4373,488 +4296,6 @@ class OrderLock {
     return enterId;
   }
 
-  unLock() { 
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.notify(this._mu, 0, 1);
-  }
-  /**
-   *  this._worker[0] is wait flag.
-   */
-  getWaitLock() {
-    console.log("emul [WANT LOCK]");
-    for(;;) {
-      if(Atomics.load(this._main, 0) === 0) {    // is the other reserved?
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      Atomics.store(this._worker, 0, 1);
-      console.log("emul [WAIT     ]", Atomics.load(this._main, 0));
-      Atomics.wait(this._mu, 0, locked);
-    }
-  }
-
-  getWaitSpinLock() {
-    let notWait = true;
-    console.log("     [WANT LOCK]");
-    for(;;) {
-      if(Atomics.load(this._worker, 0) === 0) {    // is the other reserved?
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      if(notWait) {
-        console.log("     [WAIT     ]");
-        Atomics.store(this._main, 0, 1);
-        notWait = false;
-      }
-    }
-  }
-
-  releaseWaitLock() {
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-      throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._worker, 0, 0);
-    Atomics.notify(this._mu, 0, 1)
-  }
-
-  releaseWaitSpinLock() {
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._main, 0, 0);
-    Atomics.notify(this._mu, 0, 1)
-  }
-
-
-  getIncreasingOrderLock() {
-    for(;;) {
-      if(this._worker[0] <= this._main[0]) {    // is reserved?
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      Atomics.store(this._main, 0, Atomics.add(this._order, 0 ,1));
-      Atomics.wait(this._mu, 0, locked);
-    }
-  }
-
-  getIncreasingOrderSpinLock() {
-    let waitId = -1;
-    for(;;) {
-      if(this._worker[0] >= this._main[0]) {    
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-      }
-      if(waitId < 0) {
-        waitId = Atomics.store(this._worker, 0, Atomics.add(this._order, 0 ,1));
-      }
-    }
-  }
-
-  releaseIncreasingOrderLock() { 
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._worker, 0, Atomics.add(this._order, 0 ,1));
-    Atomics.notify(this._mu, 0, 1)
-  }
-
-  releaseIncreasingOrderSpinLock() { 
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.store(this._main, 0, Atomics.add(this._order, 0 ,1));
-    Atomics.notify(this._mu, 0, 1)
-  }
-  
-  /*
-                    notify A, front==end(the last one in the queue), empty
-                                    lock() from emul // newbie intercept
-       A lockAsync(),
-                    
-  */
-  lockQueue() {
-    for(;;) {
-        if(this.isReserved()) {
-          Atomics.wait(this._queue, this.enqueue(), locked);
-        }
-
-        if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-          // get lock
-          return;
-        }
-        //Atomics.wait(this._mu, 0, locked);
-        Atomics.wait(this._queue, this.enqueue(), locked);
-        // retry should success. because it is waked up by orderd
-      }
-  }
-
-  lockAsync(waitId) {
-    ////console.log("lockAsync :" + waitId);
-    if(waitId == null) {                // newbie
-        if(this.isReserved()) {         // waiters
-            return this.getWaitAsync();
-        } else {                        // empty
-            return this.getlockAsync();
-        }
-    }
-    
-    if(waitId != null && this.isQualified(waitId)) {
-        console.log("QUALIFED: " + waitId);
-        return this.getlockAsync();
-    } else {
-        throw new Error("error with waitId: " + waitId + " reserved: " + this._reserved[0]);
-    }
-  }
-
-  getWaitAsync() {
-    const waitId = this.enqueue();
-    let waitObj;
-    waitObj = Atomics.waitAsync(this._queue, waitId, locked);
-    if(waitObj.async == false) {
-        this.dequeue();
-    }
-    return {waitObj:waitObj, waitId:waitId};
-  }
-
-  getlockAsync() {
-    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-      return {waitObj:null, waitId:null};
-    }
-    //return Atomics.waitAsync(this._mu, 0, locked);
-    return this.getWaitAsync();
-  }
-
-  /*
-  -----------------------------------------------------------------------
-  */
-
-  lockByOrder() {
-    const enterId = this.getId();
-    this.waitLoop(enterId);
-    let waitId = -1;
-
-    this.doorLock();
-    /*
-        if wait by reserved one, it wakeup once by its waitId
-    */
-    if(this.isReserved()) { // after dequeue
-      //this.waitLoop(enterId);
-      waitId = this.enqueue();
-      this.addEnterOrder();
-
-      this.doorUnLock();
-
-      Atomics.wait(this._queue, waitId, locked);
-
-      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-        //this.addEnterOrder();
-        return;
-      } else {
-        throw new Error("order broken");
-      }
-    }
-    
-    /*
-        empty queue, let's compete
-    */
-    for(;;) {
-      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-        if(waitId < 0) {
-          this.addEnterOrder();
-          this.doorUnLock();
-        }
-        return;
-      }
-
-      if(waitId > -1) {
-        throw new Error("order broken");
-      }
-
-      //this.waitLoop(enterId);
-      waitId = this.enqueue();
-      this.addEnterOrder();
-
-      this.doorUnLock();
-
-      Atomics.wait(this._queue, waitId, locked);
-    }
-  }
-
-  /*
-      emul 과 adapter 간의 진입 순서를 가르기 위함인듯.
-      
-      't2 adapter thread에서 spinlock 사용시(queue 없이) t3 emul thread가 새치기 할 수 있음'
-               t1.gelock
-      t2.wait
-               t1.unlock
-               t3.getLock
-      t2.wait
-      --> 이를 막기 위한 waitLoop
-
-
-      emul 1 개 처리동안 adapter 에서 2 개 요청 들어오는 케이스
-      enterOrder, enterId
-          1         1      t1 call    emul
-          1         2      t2 call    adapter  enterId of t2 = 1 // enterId+1, waitLoop(1 < 2)
-          2         2      t1 getLock                            // enterOrder+1 -> break t2's waitLoop
-          3         2      t2 waitAsync                          // enqueue -> enterOrder+1
-          3         3      t3 call    adapter  enterId of t3 = 2 // enterId+1, pass waitLoop
-          4         3      t3 waitAsync                          // enqueue -> enterOrder+1
-                           t1 unlock
-          4         3      t2 getLock
-
-
-          when add enterOrder? 내 처리 끝나고 후배들 waitLoop 풀어주기 위해, 혹은 뉴비가 pass 할 수 있게 준비.
-          after wait  ?
-          after get lock ?  
-          -> 둘 다
-  */
-  waitLoop(enterId) {
-    while(Atomics.load(this._enter_order, 0) < enterId) { }
-    return;
-  }
-
-  doorLock() {
-    for(;;) {
-        if (Atomics.compareExchange(this._door, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-        Atomics.wait(this._door, 0, locked);
-    }
-  }
-
-  doorSpinLock() {
-    for(;;) {
-        if (Atomics.compareExchange(this._door, 0, unlocked, locked) == unlocked) {
-          return;
-        }
-    }
-  }
-
-  doorUnLock() { 
-    if (Atomics.compareExchange(this._door, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.notify(this._door, 0, 1);
-  }
-
-  addEnterOrder() {
-    Atomics.add(this._enter_order, 0, 1);
-  }
-
-  lockAsyncByOrder() {
-    const enterId = this.getId();
-    this.waitLoop(enterId);
-
-    this.doorSpinLock();
-
-    if(this.isReserved()) {
-      return this.getWaitAsyncByOrder(enterId);
-    } else {
-      return this.getLockAsyncByOrder(enterId);
-    }
-  }
-
-  getWaitAsyncByOrder(enterId) {
-    if(enterId == null) {
-      throw new Error("order broken at fulfilled");
-    }
-    //this.waitLoop(enterId);
-    const waitId = this.enqueue();
-    const waitObj = Atomics.waitAsync(this._queue, waitId, locked);
-    if(waitObj.async == true) {
-      this.addEnterOrder();
-      this.doorUnLock();
-    }
-    return {waitObj:waitObj, waitId:waitId};
-  }
-
-  getLockAsyncByOrder(enterId) {
-    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-      this.addEnterOrder();
-      this.doorUnLock();
-      return {waitObj:null, waitId:null};
-    }
-    return this.getWaitAsyncByOrder(enterId);
-  }
-
-  retryWaitAsyncByOrder(waitId) {
-    const waitObj = Atomics.waitAsync(this._queue, waitId, locked);
-    if(waitObj.async == true) {
-      this.addEnterOrder();
-      this.doorUnLock();
-    }
-    return {waitObj:waitObj, waitId:waitId};
-  }
-
-  getLockAsyncByOrderAndReserved() {
-    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-      return {waitObj:null, waitId:null};
-    }
-    throw new Error("reserved was intercepted!");
-  }
-
-  unlockQueue() { 
-    this.doorSpinLock();
-
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    this.dequeue(); // wakeUp next
-
-    this.doorUnLock();
-  }
-
-  enqueue() {
-    const waitId = Atomics.add(this._end, 0, 1) % INT_SIZE; // modular to this._end later...to avoid race condition.
-    /* 
-        modular this._end here.
-        waitId and thie._end could be different.
-        Because the other thread add to this._end at the bewteen Atomics.add and Atomics.and
-        But, we use waitId instead of double added this._end in this function.
-    */
-    Atomics.and(this._end, 0, BIT_MOD);
-
-    Atomics.store(this._reserved, 0 , 1);
-
-    Atomics.store(this._queue, waitId, locked);
-    console.log("enqueue waitId: " + waitId);
-    return waitId;
-  }
-
-  /*
-        getLockAsyncByOrder
-
-              emul1(lock)
-              adapter1(queued)
-              emul1(unlock), adapter2(enter while emul1 dequeue)
-              
-  */
-  dequeue() {
-
-    if(this.isEmpty()) {
-      Atomics.store(this._reserved, 0 , -1);
-      return;
-    }
-    const wakeUpId = Atomics.add(this._front, 0, 1) % INT_SIZE;
-    console.log("dequeue wakeUpId: " + wakeUpId);
-                                                              // << isEmpty true
-    Atomics.and(this._front, 0, BIT_MOD);
-                                                              // << reserved == -1
-    //Atomics.store(this._reserved, 0, wakeUpId);
-
-    Atomics.store(this._queue, wakeUpId, unlocked);
-    Atomics.notify(this._queue, wakeUpId, 1);
-  }
-
-  isEmpty() {
-    return (this._front[0] % INT_SIZE) == (this._end[0] % INT_SIZE);
-  }
-
-  isFull() {
-    return ((this._end[0] + 1) % INT_SIZE) == (this._front[0] % INT_SIZE);
-  }
-
-  isQualified(waitId) {
-    //console.log("isQualified: "+ this._reserved[0] + " " + waitId);
-    return this._reserved[0] === waitId;
-  }
-
-  isReserved() {
-    const reserved = Atomics.load(this._reserved, 0);
-    if(reserved > -1) {
-      console.log("isReservd: " + reserved);
-      return true;
-    }
-    return false;
-    // return Atomics.load(this._reserved, 0) > -1;
-  }
-};
-
-
-/***/ }),
-
-/***/ "./public/js/sync.js":
-/*!***************************!*\
-  !*** ./public/js/sync.js ***!
-  \***************************/
-/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
-
-__webpack_require__.r(__webpack_exports__);
-/* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   Mutex: () => (/* binding */ Mutex)
-/* harmony export */ });
-const locked = 1;
-const unlocked = 0;
-
-class Mutex {
-  /**
-   * Instantiate Mutex.
-   * If opt_sab is provided, the mutex will use it as a backing array.
-   * @param {SharedArrayBuffer} opt_sab Optional SharedArrayBuffer.
-   */
-  constructor(opt_sab) {
-    this._sab = opt_sab || new SharedArrayBuffer(4);
-    this._mu = new Int32Array(this._sab);
-  }
-
-  /**
-   * Instantiate a Mutex connected to the given one.
-   * @param {Mutex} mu the other Mutex.
-   */
-  static connect(mu) {
-    return new Mutex(mu._sab);
-  }
-
-  lock() {
-    for(;;) {
-      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-        // get lock
-        return;
-      }
-      Atomics.wait(this._mu, 0, locked);
-      // retry
-    }
-  }
-
-  spinlock() {
-    for(;;) {
-      if (Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-        // get lock
-        return;
-      }
-      // retry
-    }
-  }
-
-  lockAsync() {
-    if(Atomics.compareExchange(this._mu, 0, unlocked, locked) == unlocked) {
-      return;
-    }
-    return Atomics.waitAsync(this._mu, 0, locked);
-  }
-
-  unlock() {
-    if (Atomics.compareExchange(this._mu, 0, locked, unlocked) != locked) {
-        return;
-      //throw new Error("Mutex is in inconsistent state: unlock on unlocked Mutex.");
-    }
-    Atomics.notify(this._mu, 0, 1);
-  }
-
-  isLocked() {
-    return Atomics.load(this._mu, 0) == locked;
-  }
-
-  getState() {
-    return Atomics.load(this._mu, 0);
-  }
 };
 
 

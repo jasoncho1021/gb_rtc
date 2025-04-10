@@ -167,3 +167,40 @@
   border: 3px solid #ff0000;
 }
 
+.togglehidden {
+  display: none;
+}
+
+.waiting {
+  font-size: 24px; /* Adjust the font size as needed */
+  font-family: Arial, sans-serif; /* Change the font family if desired */
+  position: relative; /* Position relative for absolute positioning of pseudo-elements */
+}
+
+.waiting::after {
+  content: ''; /* Initial empty content */
+  display: inline-block;
+  animation: dot-blink 1s steps(3, end) infinite; /* Animation for dots */
+}
+
+.waiting.paused::after {
+  animation: none; /* Stop the animation when paused */
+}
+
+@keyframes dot-blink {
+  0%, 20% {
+      content: ''; /* No dots */
+  }
+  20% {
+      content: '.'; /* One dot */
+  }
+  40% {
+      content: '..'; /* Two dots */
+  }
+  60% {
+      content: '...'; /* Three dots */
+  }
+  100% {
+      content: ''; /* Reset to no dots */
+  }
+}
