@@ -1063,7 +1063,7 @@ class Cartridge {
             title: this.title,
             ram: savedRam,
             rtc: savedRtc
-            }, time: -1});
+        }, time: -1});
     }
 }
 

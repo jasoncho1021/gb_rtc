@@ -53,89 +53,180 @@
   !*** css ./node_modules/css-loader/dist/cjs.js!./public/gameboy.css ***!
   \**********************************************************************/
 .gameboy {
-    position: relative;
-    height: 200px;
-    border: 3px solid #0000ff;
-}
-
-.left {
-  position: absolute;
-  top: 50%;
-  left: 5%;
-  transform: translate(0%, -50%);
-  width: 25px;
-  height: 25px;
-  border: 3px solid #ff0000;
-}
-
-.right {
-  position: absolute;
-  top: 50%;
-  right: 5%;
-  transform: translate(0%, -50%);
-  width: 25px;
-  height: 25px;
-  border: 3px solid #0000ff;
-}
-
-.up {
-  position: absolute;
-  top: 5%;
-  left: 50%;
-  transform: translate(-50%, 0%);
-  width: 25px;
-  height: 25px;
-  border: 3px solid #00ff00;
-}
-
-.down {
-  position: absolute;
-  bottom: 5%;
-  left: 50%;
-  transform: translate(-50%, 0%);
-  width: 25px;
-  height: 25px;
-  border: 3px solid #00ffff;
+  position: relative;
+  height: 200px;
+  background-color: #c0c0c0;
+  border-radius: 15px;
+  padding: 20px;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+  border: 2px solid #a0a0a0;
 }
 
 .arrow {
-    position: absolute;
-    top: 20%;
-    left: 10px;
-    width: 100px;
-    height: 100px;
-    border: 3px solid #0000ff;
-}
-
-.ab {
-    position: absolute;
-    top: 20%;
-    right: 10px;
-    width: 100px;
-    height: 100px;
-    border: 3px solid #0000ff;
-}
-
-.bbutton {
   position: absolute;
+  top: 20%;
+  left: 5%;
+  width: 100px;
+  height: 100px;
+}
+
+.left, .right, .up, .down {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  background-color: #303030;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  color: white;
+}
+
+.left {
   top: 50%;
   left: 5%;
   transform: translate(0%, -50%);
-  width: 25px;
-  height: 25px;
-  border: 3px solid #0000ff;
+  border-radius: 5px 0 0 5px;
 }
 
-.abutton {
-  position: absolute;
+.right {
   top: 50%;
   right: 5%;
   transform: translate(0%, -50%);
-  width: 25px;
-  height: 25px;
-  border: 3px solid #ff0000;
+  border-radius: 0 5px 5px 0;
 }
 
+.up {
+  top: 5%;
+  left: 50%;
+  transform: translate(-50%, 0%);
+  border-radius: 5px 5px 0 0;
+}
+
+.down {
+  bottom: 5%;
+  left: 50%;
+  transform: translate(-50%, 0%);
+  border-radius: 0 0 5px 5px;
+}
+
+.center {
+  position: absolute;
+  bottom: 25%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 25px;
+  height: 25px;
+  background-color: #404040;
+  border-radius: 50%;
+  box-shadow: inset 0 0 5px rgba(0,0,0,0.5);
+}
+
+/* Triangle areas for corners */
+.triangle-up-left {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  border-right: 30px solid transparent; /* Right side of triangle */
+  border-top: 30px solid transparent; /* Color of the triangle */
+}
+
+.triangle-up-right {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-left: 30px solid transparent; /* Left side of triangle */
+  border-top: 30px solid transparent; /* Color of the triangle */
+}
+
+.triangle-down-left {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  border-right: 30px solid transparent; /* Right side of triangle */
+  border-bottom: 30px solid transparent; /* Color of the triangle */
+}
+
+.triangle-down-right {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-left: 30px solid transparent; /* Left side of triangle */
+  border-bottom: 30px solid transparent; /* Color of the triangle */
+}
+
+.ab {
+  position: absolute;
+  top: 20%;
+  right: 5%;
+  width: 100px;
+  height: 100px;
+}
+
+.bbutton-outter {
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  transform: translate(0%, -50%);
+  width: 47%;
+  height: 100%;
+}
+
+.abutton-outter {
+  position: absolute;
+  top: 50%;
+  right: 0%;
+  transform: translate(0%, -50%);
+  width: 47%;
+  height: 100%;
+}
+
+.abutton, .bbutton {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  background-color: #a00000;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 3px 5px rgba(0,0,0,0.3);
+}
+
+.bbutton {
+  left: 2px;
+  bottom: 22px;
+}
+
+.abutton {
+  right: 2px;
+  top: 22px;
+}
+
+.abutton::after, .bbutton::after {
+  position: absolute;
+  font-size: 18px;
+}
+
+.abutton::after {
+  content: "A";
+}
+
+.bbutton::after {
+  content: "B";
+}
+    
 .optionbutton {
     position: absolute;
     top: 80%;
@@ -144,17 +235,30 @@
     transform: translate(-50%, -50%);
     width: 100px;
     height: 50px;
-    border: 3px solid #0000ff;
 }
+
+.startbutton, .selbutton {
+    position: absolute;
+    width: 35px;
+    height: 15px;
+    background-color: #505050;
+    border-radius: 10px;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #c0c0c0;
+    font-size: 10px;
+    text-transform: uppercase;
+  }
+    
 
 .selbutton {
   position: absolute;
   top: 50%;
   right: 5%;
   transform: translate(0%, -50%);
-  width: 25px;
-  height: 25px;
-  border: 3px solid #0000ff;
 }
 
 .startbutton {
@@ -162,45 +266,18 @@
   top: 50%;
   left: 5%;
   transform: translate(0%, -50%);
-  width: 25px;
-  height: 25px;
-  border: 3px solid #ff0000;
+}
+
+.startbutton::after {
+  content: "START";
+  font-size: 7px;
+}
+
+.selbutton::after {
+  content: "SELECT";
+  font-size: 7px;
 }
 
 .togglehidden {
   display: none;
-}
-
-.waiting {
-  font-size: 24px; /* Adjust the font size as needed */
-  font-family: Arial, sans-serif; /* Change the font family if desired */
-  position: relative; /* Position relative for absolute positioning of pseudo-elements */
-}
-
-.waiting::after {
-  content: ''; /* Initial empty content */
-  display: inline-block;
-  animation: dot-blink 1s steps(3, end) infinite; /* Animation for dots */
-}
-
-.waiting.paused::after {
-  animation: none; /* Stop the animation when paused */
-}
-
-@keyframes dot-blink {
-  0%, 20% {
-      content: ''; /* No dots */
-  }
-  20% {
-      content: '.'; /* One dot */
-  }
-  40% {
-      content: '..'; /* Two dots */
-  }
-  60% {
-      content: '...'; /* Three dots */
-  }
-  100% {
-      content: ''; /* Reset to no dots */
-  }
 }

@@ -34393,6 +34393,7 @@ const generatePushID = (function () {
 
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   downloadSaveFile: () => (/* binding */ downloadSaveFile),
 /* harmony export */   initEmulSound: () => (/* binding */ initEmulSound),
 /* harmony export */   pingChecker: () => (/* binding */ pingChecker),
 /* harmony export */   printLogAll: () => (/* binding */ printLogAll),
@@ -34799,23 +34800,20 @@ function initSound(soundFilledSab, soundLeftSab, soundRightSab, soundBufferLen) 
 }
 
 
-document.addEventListener('keydown', (ev) => {
-  let cb = keyHandler;
-  if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole == 1) {
-    cb = keySender;
-  }
-  messageQueue.push({callback: cb, event: ev});
-  processNextMessage();
-});
+function initHandler(target, eventName, callback, sendCallback) {
+  target.addEventListener(eventName, (ev) => {
+    let cb = callback;
+    if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole == 1) {
+      cb = sendCallback;
+    }
+    messageQueue.push({callback: cb, event: ev});
+    processNextMessage();
+  })
+}
 
-document.addEventListener('keyup', (ev) => {
-  let cb = keyHandler;
-  if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole == 1) {
-    cb = keySender;
-  }
-  messageQueue.push({callback: cb, event: ev});
-  processNextMessage();
-});
+initHandler(document, 'keydown', keyHandler, keySender);
+initHandler(document, 'keyup', keyHandler, keySender);
+
 
 const keyValues = {
   Enter: 0,
@@ -34851,11 +34849,9 @@ function keyReceiver(keyType, keyCode) {
   }
 }
 
+let keySendBuffer = new Uint8Array(2);
 
-function pressKey(keyDownCode, inputType, ev) {
-  if(keyDownCode >= 4 && keyDownCode <= 6) {
-    ev.preventDefault();
-  }
+function pressKey(keyDownCode, inputType) {
   keySendBuffer[0] = inputType;
   keySendBuffer[1] = keyDownCode;
   if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger != null) {
@@ -34872,54 +34868,28 @@ function releaseKey(keyUpCode, inputType) {
 }
 
 
-let keySendBuffer = new Uint8Array(2);
 
 function keySender(ev) {
-  let childDiv, keyNumber;
   switch (ev.type) {
     case 'keydown':
       const keyDownCode = keyValues[ev.code];
-      /*
       if(keyDownCode >= 4 && keyDownCode <= 6) {
-         ev.preventDefault();
+        ev.preventDefault();
       }
-      keySendBuffer[0] = 0;
-      keySendBuffer[1] = keyDownCode;
+      
+      if(activeKeyNumbers.has(keyDownCode)) {
+        return;
+      }
 
-      if(messenger != null) {
-        messenger.sendImg(sendFlagAndBuffer(3, keySendBuffer.buffer));
-      }
-      */
-      pressKey(keyDownCode, 0, ev);
+      activeKeyNumbers.add(keyDownCode);
+      pressKey(keyDownCode, 0);
       break;
     case 'keyup':
       const keyUpCode = keyValues[ev.code];
-      /*
-      keySendBuffer[0] = 1;
-      keySendBuffer[1] = keyUpCode;
-      if(messenger != null) {
-        messenger.sendImg(sendFlagAndBuffer(3, keySendBuffer.buffer));
+      if(activeKeyNumbers.has(keyUpCode)) {
+        activeKeyNumbers.delete(keyUpCode);
+        releaseKey(keyUpCode, 1);
       }
-      */
-      releaseKey(keyUpCode, 1);
-      break;
-    case 'touchstart':
-      childDiv = ev.target.closest('.childDiv');
-      if (childDiv) {
-          keyNumber = childDiv.getAttribute('data-child-number'); // Get the child's number
-      } else {
-        return;
-      }
-      pressKey(keyNumber, 2, ev);
-      break;
-    case 'touchend':
-      childDiv = ev.target.closest('.childDiv');
-      if (childDiv) {
-          keyNumber = childDiv.getAttribute('data-child-number'); // Get the child's number
-      } else {
-        return;
-      }
-      releaseKey(keyNumber, 3);
       break;
     default:
   }
@@ -34974,63 +34944,6 @@ function keyHandler(ev) {
   }
 }
 
-
-function touchHandler(ev) {
-  if(masterContext == null) {
-    return;
-  }
-
-  const childDiv = ev.target.closest('.childDiv');
-  let keyNumber;
-  if (childDiv) {
-      keyNumber = childDiv.getAttribute('data-child-number'); // Get the child's number
-  } else {
-    return;
-  }
-
-  switch (ev.type) {
-    case 'touchstart':
-      if(keyNumber == 6) {
-        ev.preventDefault();
-        masterContext.keyBuffer[7] = false;
-      } else if(keyNumber == 7) {
-        ev.preventDefault();
-        masterContext.keyBuffer[6] = false;
-      } else if(keyNumber == 4) {
-        ev.preventDefault();
-        masterContext.keyBuffer[5] = false;
-      } else if(keyNumber == 5) {
-        ev.preventDefault();
-        masterContext.keyBuffer[4] = false;
-      }
-      masterContext.keyBuffer[keyNumber] = true;
-      //saveMainLog("mouseDown: " + keyNumber);
-      break;
-    case 'touchend':
-      masterContext.keyBuffer[keyNumber] = false;
-      break;
-  }
-}
-
-const parentDiv = document.querySelector('.parentDiv');
-
-parentDiv.addEventListener('touchstart', (ev) => {
-  let cb = touchHandler;
-  if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole == 1) {
-    cb = keySender;
-  }
-  messageQueue.push({callback: cb, event: ev});
-  processNextMessage();
-});
-
-parentDiv.addEventListener('touchend', (ev) => {
-  let cb = touchHandler;
-  if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole == 1) {
-    cb = keySender;
-  }
-  messageQueue.push({callback: cb, event: ev});
-  processNextMessage();
-});
 
 
 let slaveContext;
@@ -35102,7 +35015,18 @@ addEventListener('beforeunload', (event) => {
   //event.preventDefault(); // Prevent the default action
 });
 
+
+//const autoSave = document.querySelector("#autoSaveCheckBox");
+
 function saveCartridge() {
+  /*
+  if(autoSave.checked) {
+    downloadSaveFile();
+  }
+  */
+}
+
+function downloadSaveFile() {
   console.log("save cartridge");
   worker.postMessage({
     msg: 'save',
@@ -35206,6 +35130,149 @@ copyBtn.addEventListener('click', () => {
         console.error('Failed to copy: ', err);
     });
 })
+
+
+let activeKeyNumbers = new Set(); // Track the currently active keys
+
+function touchHandler(ev) {
+  ev.preventDefault();
+  
+  for (let i = 0; i < ev.changedTouches.length; i++) {
+    const touch = ev.changedTouches[i];
+    checkPress(touch.clientX, touch.clientY);
+  }
+}
+
+
+function checkPress(x, y) {
+    const currentTarget = document.elementFromPoint(x, y);
+    currentTarget.classList.forEach(className => {
+        switch(className) {
+            case 'arrowDiv':
+                const keyNumber = currentTarget.getAttribute('data-child-number'); // Convert to integer
+
+                handleKeyActivation('arrowDiv', keyNumber);
+  
+                if(keyNumber >= 4 && keyNumber <= 7) {
+                /*
+                    'slide'
+                    r,bottom -> bottom
+                */
+                    for (let i = 4; i <= 7; i++) {
+                        if(i == keyNumber) {
+                            continue;
+                        }
+                        deactivateKey('arrowDiv', i);
+                    }
+                }
+            break;
+            case 'corner':
+                handleKeyActivation('arrowDiv',  currentTarget.getAttribute('data-v'));
+                handleKeyActivation('arrowDiv',  currentTarget.getAttribute('data-h'));
+            break;
+            case 'buttonDiv':
+                handleKeyActivation('buttonDiv', currentTarget.getAttribute('data-child-number'));
+            break;
+            case 'center':
+            case 'gameboy':
+                for (let i = 4; i <= 7; i++) {
+                    deactivateKey('arrowDiv', i);
+                }
+            break;
+            case 'buttonOutter':
+                deactivateKey('buttonDiv', currentTarget.querySelector('.buttonDiv').getAttribute('data-child-number'));
+            break;
+            case 'optionbutton':
+                deactivateKey('buttonDiv', '0');
+                deactivateKey('buttonDiv', '1');
+            break;
+            default:
+                //console.log("---------------");
+        }
+        
+    });
+}
+
+
+function updateActiveKeysDisplay() {
+  const displayElement = document.getElementById('activeKeysDisplay');
+  const activeKeysArray = Array.from(activeKeyNumbers); // Convert Set to Array
+  displayElement.textContent = 'Active Keys: ' + activeKeysArray.join(', '); // Update the span text
+}
+
+function handleKeyActivation(divClass, key) {
+  const keyNumber = parseInt(key, 10);
+  if (!activeKeyNumbers.has(keyNumber)) {
+    if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole == 1) {
+      pressKey(keyNumber, 2);
+    } else {
+      masterContext.keyBuffer[keyNumber] = true;
+    }
+    const childDiv = document.querySelector(`.${divClass}[data-child-number="${keyNumber}"]`);
+    childDiv.style.backgroundColor = 'blue'; // Change to your desired active color
+    activeKeyNumbers.add(keyNumber);
+    //updateActiveKeysDisplay(); // Update display
+    console.log(`%cadd ${keyNumber}`, "background:orange;color:white;");
+  }
+}
+
+function deactivateKey(divClass, key) {
+   const keyNumber = parseInt(key, 10);
+   if (activeKeyNumbers.has(keyNumber)) {
+      if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole == 1) {
+        releaseKey(keyNumber, 3);
+      } else {
+        masterContext.keyBuffer[keyNumber] = false;
+      }
+    const childDiv = document.querySelector(`.${divClass}[data-child-number="${keyNumber}"]`);
+    childDiv.style.backgroundColor = ''; // Reset to original color
+    activeKeyNumbers.delete(keyNumber);
+    //updateActiveKeysDisplay(); // Update display
+    console.log(`%cdelete ${keyNumber}`, "background:blue;color:white;");
+  }
+}
+
+function endHandler(ev) {
+  ev.preventDefault();
+
+  for (let i = 0; i < ev.changedTouches.length; i++) {
+    const touch = ev.changedTouches[i];
+    release(touch.clientX, touch.clientY);
+  }
+}
+
+
+function release(x, y) {
+    const releaseTarget = document.elementFromPoint(x, y);
+    releaseTarget.classList.forEach(className => {
+        switch(className) {
+            case 'arrowDiv':
+                deactivateKey('arrowDiv', releaseTarget.getAttribute('data-child-number'));
+            break;
+            case 'buttonDiv':
+                deactivateKey('buttonDiv', releaseTarget.getAttribute('data-child-number'));
+            break;
+            case 'corner':
+                deactivateKey('arrowDiv',  releaseTarget.getAttribute('data-v'));
+                deactivateKey('arrowDiv',  releaseTarget.getAttribute('data-h'));
+            break;
+            default:
+        }
+    });
+}
+
+// Add event listeners for touch and mouse events
+/*
+document.querySelector('.gameboy').addEventListener('touchstart', touchHandler);
+document.querySelector('.gameboy').addEventListener('touchmove', touchHandler);
+document.querySelector('.gameboy').addEventListener('touchend', endHandler);
+*/
+
+const dpad = document.querySelector('.gameboy');
+initHandler(dpad, 'touchstart', touchHandler, touchHandler);
+initHandler(dpad, 'touchmove', touchHandler, touchHandler);
+initHandler(dpad, 'touchend', endHandler, endHandler);
+
 
 /***/ }),
 
@@ -35442,11 +35509,18 @@ let netRole = -1;
 const multiPlayCheckBox = document.getElementById('multiPlayCheckBox');
 const netButtons = document.getElementById('buttons');
 
+const touchPadCheckBox = document.getElementById('touchPadCheckBox');
+const touchPad = document.querySelector('.gameboy');
+
 let connectedDialog = null;
 
 function init() {
   multiPlayCheckBox.addEventListener('change', () => {
     netButtons.classList.toggle('togglehidden');
+  });
+
+  touchPadCheckBox.addEventListener('change', () => {
+    touchPad.classList.toggle('togglehidden');
   });
 
   document.querySelector('#joinBtn').disabled = false;
@@ -35461,7 +35535,8 @@ function init() {
   connectedDialog = new _material_dialog__WEBPACK_IMPORTED_MODULE_10__.MDCDialog(document.querySelector('#connected-dialog'));
 
   document.querySelector('#printLogBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.printLogAll);
-  document.querySelector('#pingCheckerBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.pingChecker);
+  //document.querySelector('#pingCheckerBtn').addEventListener('click', pingChecker);
+  document.querySelector('#saveFileBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.downloadSaveFile);
 }
 
 let messenger = null;
@@ -35704,7 +35779,7 @@ async function hangUp(e) {
 
 function dataChannelOpened() {
   console.log('data channel opened!');
-  document.querySelector('#pingCheckerBtn').disabled = false;
+  //document.querySelector('#pingCheckerBtn').disabled = false;
   document.querySelector('#hangupBtn').disabled = false;
   document.querySelector('#copyBtn').disabled = true;
   console.log('maxMessageSize: ', peerConnection.sctp.maxMessageSize);
@@ -35713,6 +35788,9 @@ function dataChannelOpened() {
     document.querySelector('#romFileInput').disabled = true;
     document.querySelector('#romFileLabel').style.display = 'none'; 
   }
+  document.querySelector('#saveFileInput').disabled = true;
+  document.querySelector('#saveFileLabel').style.display = 'none'; 
+
   connectedDialog.open();
   (0,_js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.initEmulSound)();
 }
