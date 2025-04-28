@@ -65,10 +65,12 @@ self.onmessage = event => {
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.getContext('2d');
 
-      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas = payload.slaveCanvas;
-      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
-      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
-      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCtx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.getContext('2d');
+      if(multiPlay) {
+        _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas = payload.slaveCanvas;
+        _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
+        _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
+        _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCtx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.getContext('2d');
+      }
   
       orderLock = _orderlock_js__WEBPACK_IMPORTED_MODULE_2__.OrderLock.connect(payload.orderLock);
 
@@ -126,7 +128,12 @@ self.onmessage = event => {
       /*
           should add gbSlave
       */
-      gb.cartridge.save();
+      if(payload < 1) {
+        gb.cartridge.save();
+      } else {
+        gbSlave.cartridge.save();
+      }
+
       return;
     default:
       console.log(event);
@@ -177,7 +184,7 @@ let slaveWaitSc = false;
 let masterSkipOutputDivice = false;
 let slaveSkipOutputDivice = false;
 
-
+let masterWaitScCycles = 0;
 function noDelayUpdate() {
   const startTime = performance.now();
   _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime = startTime;
@@ -185,7 +192,7 @@ function noDelayUpdate() {
   //saveLog("start time: ", startTime.toFixed(3));
   
   //console.log("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
-  //saveEmulLog("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
+  saveEmulLog("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
 
 
   if (paused || (Atomics.load(runningState, 0) == 0)) {//!running) {
@@ -208,6 +215,7 @@ function noDelayUpdate() {
 
           상대방이 HALT 면 나도 tick하지 않기..
         */
+          //masterWaitScCycles++;
        
           if(masterHwCycles == 0 && masterWaitSc == false && slaveHalt == false) { //  && masterWaitSc == false
 
@@ -250,6 +258,11 @@ function noDelayUpdate() {
 
           if(slaveHalt == false && masterHwCycles > 0 && masterWaitSc == false) {
             masterWaitSc = gb.hardwareCycle();
+            /*
+            if(masterWaitSc) {
+              masterWaitScCycles = 0;
+            }
+            */
             masterHwCycles--;
           }
 
@@ -310,6 +323,10 @@ function noDelayUpdate() {
               */
 
               if(masterWaitSc && gbSlave.serial.sc == 254) {
+                /*
+                console.log(`%cmasterCycles: ${cycles}, slaveCycles: ${slaveCycles} masterWaitScCycles: ${masterWaitScCycles}`, 'background:black;color:white');
+                masterWaitScCycles = 0;
+                */
                 gb.serial.exchange();
                 masterWaitSc = false;
               }
@@ -377,7 +394,7 @@ function noDelayUpdate() {
     past = current;
     const gap1 = current-startTime;
 
-    //saveEmulLog("[GAP1]        {s_____e}   = " + gap1.toFixed(3) + " loopCnt: " + loopCnt);
+    saveEmulLog("[GAP1]        {s_____e}   = " + gap1.toFixed(3) + " loopCnt: " + loopCnt);
 
     //updateCount++;
     /*
@@ -508,8 +525,9 @@ function loadAndStart(rom, masterContext, slaveContext, bufferLen) {
     //masterFpsPeriod = current;
     masterFps++;
   }
-
   gb.name = 'MASTER';
+  gb.connectedGb = null;
+ 
 
   if(multiPlay) {
     gbSlave = new _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy(
@@ -1063,7 +1081,7 @@ class Cartridge {
             title: this.title,
             ram: savedRam,
             rtc: savedRtc
-        }, time: -1});
+        }, time: this.gb.name});
     }
 }
 
@@ -1147,6 +1165,8 @@ class GameBoy {
     this.cgb = false;
     
     this.cycles = 0;
+
+    this.serialHandler = false;
   }
 
   get name() {
@@ -1768,6 +1788,8 @@ class GameBoy {
         } else if ((this.ie & this.if & GameBoy.serialInterrupt) != 0) {
           this.clearInterrupt(GameBoy.serialInterrupt);
           //saveEmulLog("jump from pc: " + this.pc);
+          this.serialHandler = true;
+          //console.log(`${this.name} jump from pc: ${this.pc}`);
           this.callInterrupt(0x0058);
         } else if ((this.ie & this.if & GameBoy.joypadInterrupt) != 0) {
           this.clearInterrupt(GameBoy.joypadInterrupt);
@@ -2252,6 +2274,10 @@ class GameBoy {
         this.pc |= this.readAddress(this.sp++) << 8;
         this.ime = true;
 
+        if(this.serialHandler) {
+          this.serialHandler = false;
+          //console.log(`${this.name} RETI pc: ${this.pc}`);
+        }
         //saveEmulLog("RETI pc: " + this.pc);
       } else if ((op1 & 0x4) == 0 && op2 == 0) {
         instrName = " RET cc"
@@ -2788,15 +2814,12 @@ class Display {
             const objs = [];
             for (let obj = 0; obj < 40 && objs.length < 10; obj++) {
                 const objY = this.oam[obj * 4] - 16;
-                const objX = this.oam[obj * 4 + 1] - 8;
                 const tileY = (this.ly - objY) & 0xff;
                 if (tileY < (this.objHeight ? 16 : 8)) {
-                    let index = objs.length;
-                    const compObjX = this.oam[objs[index - 1] * 4 + 1] - 8;
-                    while (index > 0 && objX < compObjX) {
-                        index--;
-                    }
-                    objs.splice(index, 0, obj);
+                    /*
+                        fix bug: pokemon red trade animation, the left half of monster is not rendered.
+                    */
+                    objs.push(obj);
                 }
             }
 
@@ -3337,6 +3360,7 @@ class Serial {
   }
 
   set sb(value) {
+    //console.log(`${this.gb.name} set sb: ${value}`);
     //saveEmulLog(">> set sb ", value);
     this._sb = value;
   }
@@ -3347,6 +3371,7 @@ class Serial {
   }
 
   set sc(value) {
+    //console.log(`${this.gb.name} set sc: ${value}`);
     /*
         value = 128  0x 1000 0000
                 129  0x 1000 0001
@@ -3383,13 +3408,23 @@ class Serial {
   }
 
   exchange() {
+    if(this.gb.connectedGb == null) {
+      return false;
+    }
+
     const masterSb = this.sb;
     const slave = this.gb.connectedGb;
-    const slaveSb = slave.serial.sb;
+    let slaveSb = slave.serial.sb;
     
+    //console.log(`< ${this.gb.name} request serial >`);
+
     if(slave.serial.sc != 0xFE) { //& 0xFE) == 0) { // 1111 1110 ,, 0xFE
-      console.log(`%c ${this.gb.name} master sb: ${masterSb}, ${slave.name} slave sb: ${slaveSb}, slave sc: ${slave.serial.sc}`, "background:red");
-      return true;
+      console.log(`%c ${this.gb.name} is master with sb: ${masterSb}, ${slave.name} is slave with sb: ${slaveSb}, sc: ${slave.serial.sc}`, "background:orange;color:white");
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_0__.saveEmulLog)(`waitsc ${this.gb.name} is master with sb: ${masterSb}, ${slave.name} is slave with sb: ${slaveSb}, sc: ${slave.serial.sc}`);
+      if(!this.gb.cgb) {
+        //return true;   
+        slaveSb = 0; // tennisworld,, replace waitSc to respond with 0..
+      }
     }
     
     // master
@@ -3401,6 +3436,15 @@ class Serial {
     slave.serial.sb = masterSb;
     slave.serial.sc &= 0x7F;
     slave.requestInterrupt(_cpu_js__WEBPACK_IMPORTED_MODULE_1__.GameBoy.serialInterrupt);
+
+    let packet = "packet [ A 0x" + slaveSb.toString(16) + " 0x" + masterSb.toString(16) + " ]";
+    if(this.gb.name == 'MASTER') {
+      //console.log(`%c ${this.gb.name} send ${packet}`,'background:red;color:white');
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_0__.saveEmulLog)(`${this.gb.name} send ${packet}`);
+    } else {
+      //console.log(`%c ${this.gb.name} send ${packet}`,'background:green;color:white');
+      (0,_emulworker_js__WEBPACK_IMPORTED_MODULE_0__.saveEmulLog)(`${this.gb.name} send ${packet}`);
+    }
 
     return false;
   }

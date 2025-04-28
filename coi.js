@@ -74,6 +74,7 @@ if (typeof window === 'undefined') {
         const n = navigator;
 
         if (n.serviceWorker && n.serviceWorker.controller) {
+            //console.log(2);
             n.serviceWorker.controller.postMessage({
                 type: "coepCredentialless",
                 value: coi.coepCredentialless(),
@@ -86,7 +87,17 @@ if (typeof window === 'undefined') {
 
         // If we're already coi: do nothing. Perhaps it's due to this script doing its job, or COOP/COEP are
         // already set from the origin server. Also if the browser has no notion of crossOriginIsolated, just give up here.
-        if (window.crossOriginIsolated !== false || !coi.shouldRegister()) return;
+        if (window.crossOriginIsolated !== false || !coi.shouldRegister()) {
+            //console.log(3);
+            
+            // Dynamically load the RTC chunk after the COI Service Worker is processed
+            const rtcScript = document.createElement('script');
+            rtcScript.defer = true;
+            rtcScript.src = 'rtc.js'; // Path to your RTC chunk
+            document.head.appendChild(rtcScript);
+            
+            return;
+        }
 
         if (!window.isSecureContext) {
             !coi.quiet && console.log("COOP/COEP Service Worker not registered, a secure context is required.");
@@ -107,6 +118,7 @@ if (typeof window === 'undefined') {
                     // If the registration is active, but it's not controlling the page
                     if (registration.active && !n.serviceWorker.controller) {
                         !coi.quiet && console.log("Reloading page to make use of COOP/COEP Service Worker.");
+                        //console.log(1);
                         coi.doReload();
                     }
                 },
