@@ -22,6 +22,7 @@ __webpack_require__.r(__webpack_exports__);
 
 function saveEmulLog(...args) {
   //console.log(args.join(' '));
+  /*
   const message = args.join(' ');
   const enterId = orderLock.getId();
   const paddedEnterId = enterId.toString().padStart(2, ' ');
@@ -32,6 +33,7 @@ function saveEmulLog(...args) {
     payload: line,
     time: -1
   });
+  */
 }
 
 function saveLog(...args) {
@@ -66,10 +68,12 @@ self.onmessage = event => {
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.getContext('2d');
 
       if(multiPlay) {
-        _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas = payload.slaveCanvas;
-        _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
-        _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
-        _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCtx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.getContext('2d');
+        /*
+        Display.slaveCanvas = payload.slaveCanvas;
+        Display.slaveCanvas.width = Display.canvasWidth;
+        Display.slaveCanvas.height = Display.canvasHeight;
+        Display.slaveCtx = Display.slaveCanvas.getContext('2d');
+        */
       }
   
       orderLock = _orderlock_js__WEBPACK_IMPORTED_MODULE_2__.OrderLock.connect(payload.orderLock);
@@ -81,9 +85,9 @@ self.onmessage = event => {
       const travelTime = current-past;
       const leftDelayTime = delayGap - travelTime;
 
-      saveLog("delayGap     : ", delayGap.toFixed(3));
-      saveLog("travelTime   : ", travelTime.toFixed(3));
-      saveLog("leftDelayTime: ", leftDelayTime.toFixed(3));
+      saveEmulLog("delayGap     : ", delayGap.toFixed(3));
+      saveEmulLog("travelTime   : ", travelTime.toFixed(3));
+      saveEmulLog("leftDelayTime: ", leftDelayTime.toFixed(3));
       
       if(delayGap <= 0) { // repay armotized delay by skipping the wait time
         //console.log("**** 1      : Gap1 is exceed 16.74");
@@ -191,7 +195,7 @@ function noDelayUpdate() {
   const gap0 = startTime - past;
   //saveLog("start time: ", startTime.toFixed(3));
   
-  //console.log("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
+  //console.log(`%c[GAP0] {  e}__{s      }   =  ${gap0.toFixed(3)}`, "background:blue;color:white");
   saveEmulLog("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
 
 
@@ -410,7 +414,7 @@ function noDelayUpdate() {
 
   
     if(fps > 59) { //  if(gap1 > 16.74) {
-       saveLog(fps + " fps over 59, reset old delay 0");
+      saveLog(fps + " fps over 59, reset old delay 0");
       isInitUpdate = true; // reset delay
     }
 
@@ -469,7 +473,7 @@ function printFps() {
   //self.postMessage({msg: 'F', payload: fps, time:true});
 
   //console.log(`master FPS: ${masterFps}, slave FPS: ${slaveFps}`);
-  const dualFps = fps + " " + masterFps + " " + slaveFps;
+  const dualFps = masterFps;//fps + " M:" + masterFps;// + " S:";// + slaveFps;
   //console.log(`master renderCpuCycles: ${gb.display.renderCpuCycles}, slave : ${gbSlave.display.renderCpuCycles}`);
 
   self.postMessage({msg: 'F', payload: dualFps, time:true});
@@ -489,6 +493,7 @@ function printFps() {
 
   if(isInitUpdate) {
     console.log("init");
+    saveEmulLog("init");
     isInitUpdate = false;
     next = Math.floor((current-firstNext)/_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval) * _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval + firstNext;
     next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval;
@@ -503,6 +508,9 @@ let slaveBlobArrayBufferSize = 0;
 
 let masterFps = 0;
 let slaveFps = 0;
+
+let masterFrameIdx = 0;
+let slaveFrameIdx = 0;
 
 let masterFpsPeriod = 0;
 let slaveFpsPeriod = 0;
@@ -524,6 +532,7 @@ function loadAndStart(rom, masterContext, slaveContext, bufferLen) {
     //console.log(`%cmaster putImage ${(current - masterFpsPeriod).toFixed(3)}`, "background:orange");
     //masterFpsPeriod = current;
     masterFps++;
+    masterFrameIdx = (masterFrameIdx + 1) % 256;
   }
   gb.name = 'MASTER';
   gb.connectedGb = null;
@@ -537,42 +546,55 @@ function loadAndStart(rom, masterContext, slaveContext, bufferLen) {
       slaveContext.soundFilledSab,
       bufferLen
     );
-    gbSlave.display.setImageData(_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCtx.createImageData(_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth, _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight));
+
+    const width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth; // Set the width
+    const height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight; // Set the height
+
+    // Create a Uint8ClampedArray for the pixel data
+    const pixelData = new Uint8ClampedArray(width * height * 4); // 4 values per pixel (RGBA)
+
+    // Fill pixelData with your image data here
+    // For example, setting all pixels to red with full opacity
+    /*
+    for (let i = 0; i < pixelData.length; i += 4) {
+        pixelData[i] = 0;     // Red
+        pixelData[i + 1] = 0;   // Green
+        pixelData[i + 2] = 0;   // Blue
+        pixelData[i + 3] = 0; // Alpha
+    }
+    */
+
+    gbSlave.display.setImageData(new ImageData(pixelData, width, height));
+    //gbSlave.display.setImageData(Display.slaveCtx.createImageData(Display.canvasWidth, Display.canvasHeight));
     gbSlave.display.renderFrameCallback = (imageData) => { 
-      //const current = performance.now();
-      _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCtx.putImageData(imageData, 0, 0);
-      //saveEmulLog("slave putImage");
-      //console.log(`%cslave putImage ${(current - slaveFpsPeriod).toFixed(3)}`, "background:brown;color:white");
-      //slaveFpsPeriod = current;
-      slaveFps++;
 
-      try {
-        _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.convertToBlob({ type: 'image/png' }).then((blob) => 
-          {
-            blobIdx++;
-            //console.log(`%c blob: ${blob.size}, convertToBlob lap: ${(performance.now() - current).toFixed(3)}, blobIdx: ${blobIdx}`, "background:cyan;");
+      const copiedImageData = new ImageData(
+        new Uint8ClampedArray(imageData.data), // Create a new Uint8ClampedArray from the original data
+        imageData.width,
+        imageData.height
+      );
 
-          // Convert Blob to ArrayBuffer
-              blobToArrayBuffer(blob).then((arrayBuffer) => {
-                // Now you have the ArrayBuffer, you can use it as needed
-                //console.log('ArrayBuffer size:', arrayBuffer.byteLength);
-                
-                // Post the ArrayBuffer if needed
-                slaveBlobArrayBufferSize = arrayBuffer.byteLength;
+      self.postMessage({
+        msg: 'slaveImageData',
+        payload: copiedImageData,
+        time: -1
+      });
 
-                self.postMessage({
-                    msg: 'img',
-                    payload: arrayBuffer,
-                    time: blobIdx
-                });
-            }).catch(error => {
-                console.error("ArrayBuffer conversion failed:", error);
-            });
-          }
+      /*
+      if(processingPutImage == false) {
+        putImage(imageData);
+      } else {
+        const copiedImageData = new ImageData(
+          new Uint8ClampedArray(imageData.data), // Create a new Uint8ClampedArray from the original data
+          imageData.width,
+          imageData.height
         );
-      } catch(error) {
-        console.error("Blob creation failed:", error);
+        blobQueue.enqueue(copiedImageData);
+        saveEmulLog(`imageData enqueued, blobQueue size: ${blobQueue.size()} lastIdx:${slaveFrameIdx}`);
+        //console.log(`%c imageData enqueued, blobQueue size: ${blobQueue.size()} lastIdx:${slaveFrameIdx}`, 'background:pink');
       }
+      */
+
     };
 
     gbSlave.name = 'SLAVE';
@@ -592,6 +614,100 @@ function loadAndStart(rom, masterContext, slaveContext, bufferLen) {
     console.error(error);
   }
 }
+
+let processingPutImage = false;
+
+function putImage(imageData) {
+  processingPutImage = true;
+
+  _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCtx.putImageData(imageData, 0, 0);
+
+  slaveFrameIdx = (slaveFrameIdx + 1) % 256;
+
+  self.postMessage({
+    msg: 'slaveFrame',
+    payload: -1,
+    time: slaveFrameIdx + " " + masterFrameIdx
+  });
+  
+  //console.log(`${slaveFrameIdx} slave putImage`);
+
+  getBlob(slaveFrameIdx);
+}
+
+function getBlob(currentFrameIdx) {
+  try {
+    _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.convertToBlob({ type: 'image/png' }).then((blob) => 
+    {
+      // Convert Blob to ArrayBuffer
+        blobToArrayBuffer(blob).then((arrayBuffer) => {
+        
+            slaveBlobArrayBufferSize = arrayBuffer.byteLength;
+
+            saveEmulLog(`${currentFrameIdx} make blob`);
+            //console.log(`${currentFrameIdx} make blob`); // Use the stored frameIdx
+          
+            self.postMessage({
+                msg: 'img',
+                payload: arrayBuffer,
+                time: currentFrameIdx + " " + masterFrameIdx // Use the stored frameIdx
+            });
+
+        }).catch(error => {
+            console.error("ArrayBuffer conversion failed:", error);
+        });
+
+        processingPutImage = false;
+        const nextImageData = blobQueue.dequeue();
+        if(nextImageData != null) {
+          saveEmulLog('dequeue!');
+          //console.log("dequeue!");
+          putImage(nextImageData);
+        }
+      });
+  } catch(error) {
+    console.error("Blob creation failed:", error);
+  }
+}
+
+class Queue {
+  constructor() {
+      this.items = [];
+  }
+
+  // Add an item to the queue
+  enqueue(item) {
+      this.items.push(item);
+  }
+
+  // Remove and return the first item from the queue
+  dequeue() {
+      if (this.isEmpty()) {
+          return null; // or throw an error
+      }
+      return this.items.shift();
+  }
+
+  // Check if the queue is empty
+  isEmpty() {
+      return this.items.length === 0;
+  }
+
+  // Return the size of the queue
+  size() {
+      return this.items.length;
+  }
+
+  // Peek at the first item in the queue without removing it
+  peek() {
+      if (this.isEmpty()) {
+          throw new Error("queue is empty at peek");
+      }
+      return this.items[0];
+  }
+}
+
+const blobQueue = new Queue();
 
 
 // Helper function to convert Blob to ArrayBuffer

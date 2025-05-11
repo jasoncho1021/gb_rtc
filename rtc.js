@@ -26983,14 +26983,54 @@ let masterContext = null;
 
 const messageQueue = [];
 
+class Queue {
+  constructor() {
+      this.items = [];
+  }
+
+  // Add an item to the queue
+  enqueue(item) {
+      this.items.push(item);
+  }
+
+  // Remove and return the first item from the queue
+  dequeue() {
+      if (this.isEmpty()) {
+          return null; // or throw an error
+      }
+      return this.items.shift();
+  }
+
+  // Check if the queue is empty
+  isEmpty() {
+      return this.items.length === 0;
+  }
+
+  // Return the size of the queue
+  size() {
+      return this.items.length;
+  }
+
+  // Peek at the first item in the queue without removing it
+  peek() {
+      if (this.isEmpty()) {
+          throw new Error("queue is empty at peek");
+      }
+      return this.items[0];
+  }
+}
+const frameQueue = new Queue();
+
 let sendBytes = 0;
 
 function saveMainLog(...args) {
+  /*
   const message = args.join(' ');
   const enterId = orderLock.getId();
   const paddedEnterId = enterId.toString().padStart(2, ' ');
   const line = "[main] : " + paddedEnterId + " $ " + message;
   logger.postMessage({option:0, data:line});
+  */
 }
 
 const pingResult = document.querySelector('#pingResult');
@@ -27101,8 +27141,61 @@ let soundIdx = 0;
 const masterReceivedChunks = []; // Array to store received chunks
 const slaveReceivedChunks = []; // Array to store received chunks
 
+let slaveFps = 0;
+
+let recvFirstFrame = 0;
+
+let oldSlaveFpsLap = 0;
+function printSlaveFps() {
+  //const currentSlaveFpsLap = performance.now();
+  fpsPrint.innerText = slaveFps;// + " " + (currentSlaveFpsLap - oldSlaveFpsLap).toFixed(3);
+  //oldSlaveFpsLap = currentSlaveFpsLap;
+  slaveFps = 0;
+}
+
+let slaveFpsInterval;
+
 function putBlob(e) {
   const combinedBuffer = e.data; // The received ArrayBuffer
+  
+  if(typeof combinedBuffer == 'string') {
+    const frameInfo = combinedBuffer.split(" ");
+    const frameFlag = frameInfo[0];
+    const frameIdx = frameInfo[1];
+    
+    if(frameFlag == 'R') {
+      /*
+          restart
+      */
+      if(frameQueue.peek() == frameIdx) {
+        frameQueue.dequeue();
+
+        saveMainLog(`recvIdx ${frameIdx}`);
+        //console.log(`%c recvIdx ${frameIdx}`, 'background:yellow');
+
+        isReceivedframeAck = true;
+        waitRecvCount--;
+
+        if(waitingFrameAck) {
+          waitingFrameAck = false;
+          saveMainLog(`M wake up`);
+          //console.log(`%c M wake up`, 'background:black;color:white');
+          worker.postMessage({
+            msg: 'restart',
+            payload: -1
+          });
+        }
+      } else {
+        throw new Error(`frame idx not matched. sendFrameIdx: ${frameQueue.peek()}, recvFrameIdx: ${frameIdx}`);
+      }
+      
+    } else {
+      throw new Error('frame data parsing error');
+    }
+    return;
+  }
+
+
   const dataView = new DataView(combinedBuffer);
   const flag = dataView.getUint8(0, true); // true for little-endian
 
@@ -27130,6 +27223,16 @@ function putBlob(e) {
     soundIdx = (soundIdx + bufferSamples) % soundBufferLen;
     
   } else if (flag == 2) {
+   
+    /*
+        overhead simulation code
+    */
+    //for(let i =0; i < 100000000; i++) {}
+
+    const frameIdx = dataView.getUint8(1, true);
+    _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendData("R " + frameIdx);
+    //console.log(`%crespond ${frameIdx}`, 'background:green;color:orange');
+
     if(displayCanvasCtx == null) {
       displayCanvas = document.getElementById('canvas');
       const width = 160 + 2 * 16;
@@ -27139,8 +27242,8 @@ function putBlob(e) {
       displayCanvasCtx = displayCanvas.getContext('2d');
     }
 
-      //const arrayBuffer = e.data;
-      const arrayBuffer = originalDataArray;
+      const arrayBuffer = new Uint8Array(combinedBuffer, 2);
+      //const arrayBuffer = originalDataArray;
       // Convert ArrayBuffer to Blob
       const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' }); // Specify the MIME type if known
 
@@ -27153,7 +27256,17 @@ function putBlob(e) {
           displayCanvasCtx.drawImage(img, 0, 0, displayCanvas.width, displayCanvas.height); // Draw the image
           URL.revokeObjectURL(url); // Release the Blob URL
       };
+
       img.src = url; // Set the image source to the Blob URL
+
+      if(!recvFirstFrame) {
+        recvFirstFrame = true;
+        //oldSlaveFpsLap = performance.now();
+        slaveFpsInterval = setInterval(() => printSlaveFps(), 1000);
+      }
+
+      slaveFps++;
+
     } else if (flag == 3) {
      let keyAction;
      const inputType = originalDataArray[0];
@@ -27263,7 +27376,7 @@ function putBlob(e) {
 }
 
 
-function sendFlagAndBuffer(flag, arrayBuffer) {
+function sendFlagAndBuffer(flag, arrayBuffer, idx) {
   let bufferToSend;
 
   // Check if the input is a Float32Array
@@ -27275,6 +27388,26 @@ function sendFlagAndBuffer(flag, arrayBuffer) {
       bufferToSend = arrayBuffer;
   } else {
       throw new Error("Unsupported type: arrayBuffer must be a Float32Array or ArrayBuffer");
+  }
+
+  if(flag == 2) {
+    const idxSize = 1; // Size of the index (8-bit integer)
+    const combinedBufferSize = 1 + idxSize + bufferToSend.byteLength; // Include idx size
+    const combinedBuffer = new ArrayBuffer(combinedBufferSize);
+
+    // Create a DataView to write the address
+    const dataView = new DataView(combinedBuffer);
+    dataView.setUint8(0, flag, true); // Write the flag at the start of the buffer (little-endian)
+    dataView.setUint8(1, idx, true); // Set the idx after the flag (8-bit)
+
+    // Create a Uint8Array view of the combined buffer to copy the original ArrayBuffer
+    const combinedArray = new Uint8Array(combinedBuffer);
+    const originalArray = new Uint8Array(bufferToSend);
+
+    // Copy the original ArrayBuffer data into the combined buffer
+    combinedArray.set(originalArray, 2); // Start copying after flag and idx
+
+    return combinedArray;
   }
 
   // Create a new ArrayBuffer to hold the address and the original buffer
@@ -27303,6 +27436,14 @@ let isSendingChunks = false; // Flag to indicate if chunks are being sent
 function saveAndDownload(combinedDataRtc, title) {
   saveVariableDataAsFile(JSON.stringify(combinedDataRtc), title + '.json', 'application/json'); // Save combined data to a file
 }
+
+
+const blobQueue = new Queue();
+let slaveFrameIdx = 0;
+let isReceivedframeAck = false; 
+let waitRecvCount = 0;
+let waitingFrameAck = false;
+let processingPutImage = false;
 
 function workerHandler(event) {
   const {msg, payload, time} = event.data;
@@ -27368,39 +27509,171 @@ function workerHandler(event) {
         _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(soundData);
       }
       break;
+    /*
     case 'img':
-      if (_rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger != null) {
-        const imgData = sendFlagAndBuffer(2, payload);
+      if (messenger != null) {
+        const fpsCount = time.split(" ");
+        const slaveFrameIdx = fpsCount[0];
+        const masterFrameIdx = fpsCount[1];
+        const imgData = sendFlagAndBuffer(2, payload, slaveFrameIdx);
         sendBytes += imgData.byteLength;
         //console.log("imgData: ", imgData.byteLength);
-        _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(imgData);
-        /*
-        const currentLap = performance.now();
-        console.log(`%c after sendImg call: ${(currentLap-sendimgLap).toFixed(3)}, blobIdx: ${time}`, "background:red; color:white")
-        sendimgLap = currentLap;
-        */
+
+        saveMainLog(`sendFrameIdx ${slaveFrameIdx}`);
+        //console.log(`%c sendFrameIdx ${slaveFrameIdx}`, 'background:cyan');
+        
+        //frameQueue.enqueue(slaveFrameIdx);
+        //isReceivedframeAck = false;
+        
+        messenger.sendImg(imgData);
+
+        
+        //const currentLap = performance.now();
+        //console.log(`%c after sendImg call: ${(currentLap-sendimgLap).toFixed(3)}, blobIdx: ${time}`, "background:red; color:white")
+        //sendimgLap = currentLap;
+        
       }
       break;
+    */
     case 'F':
       sendBytes = 0;
-      //saveMainLog("fps: " + payload);
+      saveMainLog("fps: " + payload);
       fpsPrint.innerText = payload;
       break;
+    case 'slaveImageData':
+      const imageData = payload;
+      if(processingPutImage == false) {
+        putImage(imageData);
+      } else {
+        blobQueue.enqueue(imageData);
+        saveMainLog(`imageData enqueued, blobQueue size: ${blobQueue.size()} lastIdx:${slaveFrameIdx}`);
+      }
+
+      break;
+    /*
+    case 'slaveFrame':
+      const fpsCount = time.split(" ");
+      const slaveFrameIdx = fpsCount[0];
+      frameQueue.enqueue(slaveFrameIdx);
+      isReceivedframeAck = false;
+      waitRecvCount--;
+      saveMainLog(`${slaveFrameIdx} slave putImage`);
+      break;
+    */
     case 'M':
+       /*
+          overhead simulation code
+      */
+     /*
       worker.postMessage({
         msg: 'restart',
         payload: -1
       });
+      */
+   
+      
+      if(waitRecvCount == 0) {//if(isReceivedframeAck) {
+        saveMainLog('M pass');
+        //console.log('%c M pass                                      ', 'background:orange');
+        //fpsPrint.innerText = 'M pass';
+        worker.postMessage({
+          msg: 'restart',
+          payload: -1
+        });
+      } else {
+        waitingFrameAck = true;
+      }
+      
       break;
+    /*
     case 'T':
       worker.postMessage({
         msg: 'start',
         payload: -1
       });
       break;
+    */
     default:
       saveMainLog("nothing at workerHandler");
   }
+}
+
+
+function putImage(imageData) {
+  processingPutImage = true;
+
+  slaveCanvasCtx.putImageData(imageData, 0, 0);
+
+  slaveFrameIdx = (slaveFrameIdx + 1) % 256;
+
+  frameQueue.enqueue(slaveFrameIdx);
+  isReceivedframeAck = false;
+  waitRecvCount++;
+  saveMainLog(`${slaveFrameIdx} slave putImage`);
+
+  getBlob(slaveFrameIdx, performance.now());
+}
+
+function getBlob(currentFrameIdx, slaveFrameStart) {
+  try {
+    slaveCanvasWorker.convertToBlob({ type: 'image/png' }).then((blob) => 
+    {	
+       const slaveTimeLap = performance.now();
+       saveMainLog(`${currentFrameIdx} make blob,  lap: ${(slaveTimeLap - slaveFrameStart).toFixed(3)}`);
+ 
+      // Convert Blob to ArrayBuffer
+        blobToArrayBuffer(blob).then((arrayBuffer) => {
+
+            saveMainLog(`${currentFrameIdx} blob to buffer`);
+            //console.log(`${currentFrameIdx} make blob`); // Use the stored frameIdx
+          
+            if (_rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger != null) {
+              const imgData = sendFlagAndBuffer(2, arrayBuffer, currentFrameIdx);
+              sendBytes += imgData.byteLength;
+              //console.log("imgData: ", imgData.byteLength);
+      
+              //console.log(`%c sendFrameIdx ${slaveFrameIdx}`, 'background:cyan');
+              /*
+              frameQueue.enqueue(slaveFrameIdx);
+              isReceivedframeAck = false;
+              */
+             _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(imgData);
+             saveMainLog(`sendFrameIdx ${currentFrameIdx},  lap: ${(performance.now() - slaveTimeLap).toFixed(3)}`);
+
+
+      
+              /*
+              const currentLap = performance.now();
+              console.log(`%c after sendImg call: ${(currentLap-sendimgLap).toFixed(3)}, blobIdx: ${time}`, "background:red; color:white")
+              sendimgLap = currentLap;
+              */
+            }
+
+        }).catch(error => {
+            console.error("ArrayBuffer conversion failed:", error);
+        });
+
+        processingPutImage = false;
+        const nextImageData = blobQueue.dequeue();
+        if(nextImageData != null) {
+          saveMainLog('dequeue!');
+          //console.log("dequeue!");
+          putImage(nextImageData);
+        }
+      });
+  } catch(error) {
+    console.error("Blob creation failed:", error);
+  }
+}
+
+// Helper function to convert Blob to ArrayBuffer
+function blobToArrayBuffer(blob) {
+  return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(blob);
+  });
 }
 
 let soundCtx;
@@ -27499,21 +27772,25 @@ function keyReceiver(keyType, keyCode) {
   }
 }
 
-let keySendBuffer = new Uint8Array(2);
+let keySendBuffer = new Uint8Array(3);
 
 function pressKey(keyDownCode, inputType) {
-  keySendBuffer[0] = inputType;
-  keySendBuffer[1] = keyDownCode;
+  keySendBuffer[0] = 3;
+  keySendBuffer[1] = inputType;
+  keySendBuffer[2] = keyDownCode;
   if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger != null) {
-    _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(sendFlagAndBuffer(3, keySendBuffer.buffer));
+    //messenger.sendImg(sendFlagAndBuffer(3, keySendBuffer.buffer));
+    _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(keySendBuffer.buffer);
   }
 }
 
 function releaseKey(keyUpCode, inputType) {
-  keySendBuffer[0] = inputType;
-  keySendBuffer[1] = keyUpCode;
+  keySendBuffer[0] = 3;
+  keySendBuffer[1] = inputType;
+  keySendBuffer[2] = keyUpCode;
   if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger != null) {
-    _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(sendFlagAndBuffer(3, keySendBuffer.buffer));
+    //messenger.sendImg(sendFlagAndBuffer(3, keySendBuffer.buffer));
+    _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(keySendBuffer.buffer);
   }
 }
 
@@ -27624,10 +27901,17 @@ function startGame(rom) {
   runGame(rom, multiPlay);
 }
 
+let slaveCanvasCtx;
+let slaveCanvasWorker;
+
 function runGame(rom, multiPlay) {
   const uInt8Array = new Uint8Array(rom);
   const canvasWorker = document.getElementById('canvas').transferControlToOffscreen();
-  const slaveCanvasWorker = document.getElementById('canvashidden').transferControlToOffscreen();
+
+  slaveCanvasWorker = document.getElementById('canvashidden').transferControlToOffscreen();
+  slaveCanvasWorker.width = 160 + 2 * 16;
+  slaveCanvasWorker.height = 144 + 2 * 16;
+  slaveCanvasCtx = slaveCanvasWorker.getContext('2d');
 
   if(multiPlay == false) { // netRole == -1
     masterContext = new VariableInitializer();
@@ -27650,13 +27934,13 @@ function runGame(rom, multiPlay) {
           slaveContext: slaveContext,
           multiPlay: multiPlay,
           canvas: canvasWorker,
-          slaveCanvas: slaveCanvasWorker,
+          //slaveCanvas: slaveCanvasWorker,
           rom: uInt8Array,
           orderLock: orderLock,
           bufferLen: soundBufferLen,
         }
       },
-      [canvasWorker, slaveCanvasWorker, uInt8Array.buffer]);
+      [canvasWorker, /*slaveCanvasWorker,*/ uInt8Array.buffer]);
 }
 
 addEventListener('beforeunload', (event) => {
