@@ -27024,13 +27024,11 @@ const frameQueue = new Queue();
 let sendBytes = 0;
 
 function saveMainLog(...args) {
-  /*
   const message = args.join(' ');
   const enterId = orderLock.getId();
   const paddedEnterId = enterId.toString().padStart(2, ' ');
   const line = "[main] : " + paddedEnterId + " $ " + message;
   logger.postMessage({option:0, data:line});
-  */
 }
 
 const pingResult = document.querySelector('#pingResult');
@@ -27173,6 +27171,7 @@ function putBlob(e) {
         saveMainLog(`recvIdx ${frameIdx}`);
         //console.log(`%c recvIdx ${frameIdx}`, 'background:yellow');
 
+        /*
         isReceivedframeAck = true;
         waitRecvCount--;
 
@@ -27185,6 +27184,7 @@ function putBlob(e) {
             payload: -1
           });
         }
+        */
       } else {
         throw new Error(`frame idx not matched. sendFrameIdx: ${frameQueue.peek()}, recvFrameIdx: ${frameIdx}`);
       }
@@ -27564,14 +27564,15 @@ function workerHandler(event) {
        /*
           overhead simulation code
       */
-     /*
+     
       worker.postMessage({
         msg: 'restart',
         payload: -1
       });
-      */
-   
       
+   
+   
+      /*
       if(waitRecvCount == 0) {//if(isReceivedframeAck) {
         saveMainLog('M pass');
         //console.log('%c M pass                                      ', 'background:orange');
@@ -27583,7 +27584,7 @@ function workerHandler(event) {
       } else {
         waitingFrameAck = true;
       }
-      
+      */
       break;
     /*
     case 'T':

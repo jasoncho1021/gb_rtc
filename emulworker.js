@@ -22,7 +22,6 @@ __webpack_require__.r(__webpack_exports__);
 
 function saveEmulLog(...args) {
   //console.log(args.join(' '));
-  /*
   const message = args.join(' ');
   const enterId = orderLock.getId();
   const paddedEnterId = enterId.toString().padStart(2, ' ');
@@ -33,7 +32,6 @@ function saveEmulLog(...args) {
     payload: line,
     time: -1
   });
-  */
 }
 
 function saveLog(...args) {
@@ -2658,6 +2656,8 @@ class Display {
         //this.priorRenderLap = 0;
 
         this._renderCpuCycles = 0;
+
+        this.fpsPeriod = 0;
     }
 
     get renderCpuCycles() {
@@ -3109,7 +3109,11 @@ class Display {
     renderFrame() {
         //customLog("%c render before","background:blue; color:white")
         //Display.ctx.putImageData(this.imageData, 0, 0);
-        this._renderFrameCallback(this.imageData);
+
+        if((++this.fpsPeriod) == Display.fps) {
+            this._renderFrameCallback(this.imageData);
+            this.fpsPeriod = 0;
+        }
    
         //customLog("GameBoy start time: ", GameBoy.startTime.toFixed(3));
         //const current = performance.now();
@@ -3222,7 +3226,7 @@ Display.canvas.height = Display.canvasHeight;
 Display.ctx = Display.canvas.getContext('2d');
 
  */
-Display.fps = 0;
+Display.fps = 1;
 Display.renderCpuCycles = 0;
 
 
