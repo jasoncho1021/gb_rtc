@@ -27014,12 +27014,14 @@ class Queue {
   // Peek at the first item in the queue without removing it
   peek() {
       if (this.isEmpty()) {
+          //console.log("queue is empty at peek");
           throw new Error("queue is empty at peek");
       }
       return this.items[0];
   }
 }
-const frameQueue = new Queue();
+
+//let frameQueue = new Queue();
 
 let sendBytes = 0;
 
@@ -27032,18 +27034,20 @@ function saveMainLog(...args) {
 }
 
 const pingResult = document.querySelector('#pingResult');
-let pingSend;
+const pingSendQueue = new Queue();
+let pingSendCount = 0;
 function pingChecker() {
   let count = 0;
   pingResult.textContent = "[";
   const intervalId = setInterval(() => {
     if(count++ == 5) {
       clearInterval(intervalId);
-      pingResult.textContent += " ] finist";
       return;
     }
-    pingSend = Date.now();
-    sendMessage("P 0");
+    pingSendCount++;
+    const pingSend = Date.now();
+    pingSendQueue.enqueue(pingSend);
+    _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.send("P 0 " + pingSend);
   }, 1000);
 }
 
@@ -27139,69 +27143,168 @@ let soundIdx = 0;
 const masterReceivedChunks = []; // Array to store received chunks
 const slaveReceivedChunks = []; // Array to store received chunks
 
-let slaveFps = 0;
+let recvSnapShotIdx = -1;
+
 
 let recvFirstFrame = 0;
 
+let slaveFpsInterval;
+let slaveFps = 0;
 let oldSlaveFpsLap = 0;
+
 function printSlaveFps() {
-  //const currentSlaveFpsLap = performance.now();
-  fpsPrint.innerText = slaveFps;// + " " + (currentSlaveFpsLap - oldSlaveFpsLap).toFixed(3);
-  //oldSlaveFpsLap = currentSlaveFpsLap;
+  const currentSlaveFpsLap = performance.now();
+  fpsPrint.innerText = slaveFps + " " + (currentSlaveFpsLap - oldSlaveFpsLap).toFixed(3);
+  oldSlaveFpsLap = currentSlaveFpsLap;
   slaveFps = 0;
 }
 
-let slaveFpsInterval;
 
-function putBlob(e) {
-  const combinedBuffer = e.data; // The received ArrayBuffer
-  
-  if(typeof combinedBuffer == 'string') {
-    const frameInfo = combinedBuffer.split(" ");
-    const frameFlag = frameInfo[0];
-    const frameIdx = frameInfo[1];
-    
-    if(frameFlag == 'R') {
-      /*
-          restart
-      */
-      if(frameQueue.peek() == frameIdx) {
-        frameQueue.dequeue();
-
-        saveMainLog(`recvIdx ${frameIdx}`);
-        //console.log(`%c recvIdx ${frameIdx}`, 'background:yellow');
-
-        /*
-        isReceivedframeAck = true;
-        waitRecvCount--;
-
-        if(waitingFrameAck) {
-          waitingFrameAck = false;
-          saveMainLog(`M wake up`);
-          //console.log(`%c M wake up`, 'background:black;color:white');
-          worker.postMessage({
-            msg: 'restart',
-            payload: -1
-          });
-        }
-        */
-      } else {
-        throw new Error(`frame idx not matched. sendFrameIdx: ${frameQueue.peek()}, recvFrameIdx: ${frameIdx}`);
-      }
-      
-    } else {
-      throw new Error('frame data parsing error');
-    }
-    return;
+function setImage(dataView, combinedBuffer) {
+  recvSnapShotIdx = dataView.getUint32(1, true);
+  //console.log(`processing idx: ${recvSnapShotIdx} <<`);
+  saveMainLog(`processing idx: ${recvSnapShotIdx} <<`);
+ 
+  if(displayCanvasCtx == null) {
+    displayCanvas = document.getElementById('canvas');
+    const width = 160 + 2 * 16;
+    const height = 144 + 2 * 16;
+    displayCanvas.width = width;
+    displayCanvas.height = height;
+    displayCanvasCtx = displayCanvas.getContext('2d');
   }
 
+    const arrayBuffer = new Uint8Array(combinedBuffer, 5); // 1 + 4
+    //const arrayBuffer = originalDataArray;
+    // Convert ArrayBuffer to Blob
+    const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' }); // Specify the MIME type if known
 
+    // Now you can use the Blob, for example, to display it on a canvas
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = function() {
+        const displayCanvasCtx = displayCanvas.getContext('2d');
+        displayCanvasCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height); // Clear the canvas
+        displayCanvasCtx.drawImage(img, 0, 0, displayCanvas.width, displayCanvas.height); // Draw the image
+        URL.revokeObjectURL(url); // Release the Blob URL
+    };
+
+    img.src = url; // Set the image source to the Blob URL
+
+    if(!recvFirstFrame) {
+      recvFirstFrame = true;
+      slaveFpsInterval = setInterval(() => printSlaveFps(), 1000);
+    }
+
+    slaveFps++;
+}
+
+const recvQueue = new Queue();
+
+async function delaySimulator(combinedBuffer) {
+  recvQueue.enqueue(combinedBuffer);
+  if(recvQueue.size() == 1) {
+    await setDelay(recvQueue.peek());
+  }
+}
+
+async function recvDataHandler(combinedBuffer) {
+  recvQueue.enqueue(combinedBuffer);
+  if(recvQueue.size() == 1) {
+    await processRecvData(recvQueue.peek());
+  }
+}
+
+/*
+function setDelay(combinedBuffer) {
+  const randomDelay = Math.floor(Math.random() * 23);
+  setTimeout((() => {
+    //const old = performance.now();
+    //const delay = randomDelay;
+    const cb = combinedBuffer;
+    return () => {
+      //console.log(`${delay}, ${(performance.now() - old).toFixed(3)}`);
+      slaveHandler(cb);
+
+      recvQueue.dequeue();
+
+      if(!recvQueue.isEmpty()) {
+        console.log(`recvQueue size: ${recvQueue.size()}`);
+
+        const c = recvQueue.peek();
+        setDelay(c);
+      }
+    };
+  })(), randomDelay);
+}
+*/
+
+function processRecvData(combinedBuffer) {
+  /*
+    slaveHandler(combinedBuffer); // combinedBuffer is used here
+
+    recvQueue.dequeue();
+
+    if (!recvQueue.isEmpty()) {
+        console.log(`recvQueue size: ${recvQueue.size()}`);
+        saveMainLog(`recvQueue size: ${recvQueue.size()}`);
+
+        processRecvData(recvQueue.peek()); // This calls setDelay again with the next item
+    } else {
+        console.log(`empty`);
+        saveMainLog(`empty`);
+    }
+  */
+  
+  return new Promise(resolve => {
+        // Here, combinedBuffer is accessible
+        slaveHandler(combinedBuffer); // combinedBuffer is used here
+
+        recvQueue.dequeue();
+
+        if (!recvQueue.isEmpty()) {
+            console.log(`%crecvQueue size: ${recvQueue.size()}`, 'background:yellow;color:white');
+            saveMainLog(`recvQueue size: ${recvQueue.size()}`);
+    
+            resolve(processRecvData(recvQueue.peek())); // This calls setDelay again with the next item
+        } else {
+            //console.log('empty');
+            saveMainLog(`empty`);
+            resolve(); // Resolve when the queue is empty
+        }
+  });
+}
+
+function setDelay(combinedBuffer) {
+  return new Promise(resolve => {
+      const randomDelay = Math.floor(Math.random() * 17);
+      const old = performance.now();
+      setTimeout(() => {
+          console.log(`${randomDelay}, ${(performance.now() - old).toFixed(3)}`);
+
+          // Here, combinedBuffer is accessible
+          slaveHandler(combinedBuffer); // combinedBuffer is used here
+
+          recvQueue.dequeue();
+
+          if (!recvQueue.isEmpty()) {
+              console.log(`recvQueue size: ${recvQueue.size()}`);
+      
+              resolve(setDelay(recvQueue.peek())); // This calls setDelay again with the next item
+          } else {
+              console.log('empty');
+              resolve(); // Resolve when the queue is empty
+          }
+      }, randomDelay);
+  });
+}
+
+function slaveHandler(combinedBuffer) {
   const dataView = new DataView(combinedBuffer);
-  const flag = dataView.getUint8(0, true); // true for little-endian
+  const flag = dataView.getUint8(0, true); 
 
-  // Create a new Uint8Array to represent the original data
-  const originalDataArray = new Uint8Array(combinedBuffer, 1); // Start reading after the address
-
+  //console.log(`${flag} dequeue`);
+  
   if (flag == 1) {
    
     const slaveBuffer = new Float32Array((combinedBuffer.byteLength-1) / 4);
@@ -27227,78 +27330,103 @@ function putBlob(e) {
     /*
         overhead simulation code
     */
-    //for(let i =0; i < 100000000; i++) {}
+      
+   //for(let i =0; i < 60000000; i++) {}
+   
+    setImage(dataView, combinedBuffer);
+  }
+}
 
-    const frameIdx = dataView.getUint8(1, true);
-    _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendData("R " + frameIdx);
-    //console.log(`%crespond ${frameIdx}`, 'background:green;color:orange');
+let pingRecvCount = 0;
+function putBlob(e) {
+  const combinedBuffer = e.data; // The received ArrayBuffer
+  
+  /*
+    ping checker
+  */
+  if(typeof combinedBuffer == 'string') {
+    //for(let i = 0; i < 1000000000; i++){};
 
-    if(displayCanvasCtx == null) {
-      displayCanvas = document.getElementById('canvas');
-      const width = 160 + 2 * 16;
-      const height = 144 + 2 * 16;
-      displayCanvas.width = width;
-      displayCanvas.height = height;
-      displayCanvasCtx = displayCanvas.getContext('2d');
+    const recvPing = JSON.parse(combinedBuffer).split(" ");
+    const pingRole = recvPing[1];
+    const recvPingVal = Number(recvPing[2]);
+    const currentDate = Date.now();
+    const pingValue = currentDate - recvPingVal;
+
+    if(pingRole == '0') {
+      pingRecvCount++;
+      if(pingRecvCount == 1) {
+        pingResult.textContent = "[";
+      }
+      _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.send("P 1 " + currentDate);
+      pingResult.textContent += ` ${pingValue}`;
+      if(pingRecvCount == 5) {
+        pingResult.textContent += " ] finished";
+        pingRecvCount = 0;
+      }
+    } else if (pingRole =='1') {
+      pingResult.textContent += ` ${pingValue}(${currentDate - pingSendQueue.dequeue()})`;
+      if(pingSendCount == 5) {
+        pingResult.textContent += " ] finished";
+        pingSendCount = 0;
+      }
     }
 
-      const arrayBuffer = new Uint8Array(combinedBuffer, 2);
-      //const arrayBuffer = originalDataArray;
-      // Convert ArrayBuffer to Blob
-      const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' }); // Specify the MIME type if known
+    return;
+  }
 
-      // Now you can use the Blob, for example, to display it on a canvas
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      img.onload = function() {
-          const displayCanvasCtx = displayCanvas.getContext('2d');
-          displayCanvasCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height); // Clear the canvas
-          displayCanvasCtx.drawImage(img, 0, 0, displayCanvas.width, displayCanvas.height); // Draw the image
-          URL.revokeObjectURL(url); // Release the Blob URL
-      };
+  const dataView = new DataView(combinedBuffer);
+  const flag = dataView.getUint8(0, true); // true for little-endian
 
-      img.src = url; // Set the image source to the Blob URL
+  if (flag == 1) {
+   
+    //console.log(`${flag} enqueue`);
 
-      if(!recvFirstFrame) {
-        recvFirstFrame = true;
-        //oldSlaveFpsLap = performance.now();
-        slaveFpsInterval = setInterval(() => printSlaveFps(), 1000);
+    //delaySimulator(combinedBuffer);
+    recvDataHandler(combinedBuffer);
+
+  } else if (flag == 2) {
+   
+    /*
+        overhead simulation code
+    */
+      
+   //for(let i =0; i < 60000000; i++) {}
+   
+   //setImage(dataView, combinedBuffer);
+
+    //console.log(`${flag} enqueue, idx: ${dataView.getUint8(1, true)}`);
+
+    //delaySimulator(combinedBuffer);
+    recvDataHandler(combinedBuffer);
+   
+  } else if (flag == 3) {
+      let keyAction;
+      const inputType = dataView.getUint8(1, true);
+      switch (inputType) {
+        case 0:
+          keyAction = 'keydown';
+          break;
+        case 1:
+          keyAction = 'keyup';
+          break;
+        case 2:
+          keyAction = 'touchstart';
+          break;
+        case 3:
+          keyAction = 'touchend';
+          break;
+        default:
+          throw new Error('not mapped input type');
       }
 
-      slaveFps++;
-
-    } else if (flag == 3) {
-     let keyAction;
-     const inputType = originalDataArray[0];
-     switch (inputType) {
-      case 0:
-        keyAction = 'keydown';
-        break;
-      case 1:
-        keyAction = 'keyup';
-        break;
-      case 2:
-        keyAction = 'touchstart';
-        break;
-      case 3:
-        keyAction = 'touchend';
-        break;
-      default:
-        throw new Error('not mapped input type');
-     }
-     /*
-     if(originalDataArray[0] == 0) {
-        keyAction = 'keydown';
-     } else if(originalDataArray[0] == 1) {
-        keyAction = 'keyup';
-     }
-      */
+      keyInputQueue.enqueue({ keyType: keyAction, keyCode: dataView.getUint8(2, true), keyFrameIdx : dataView.getUint32(3, true) });
      
-      keyReceiver(keyAction, originalDataArray[1]);
+      //keyReceiver(keyAction, originalDataArray[1]);
+
     } else if(flag == 4) {
-      //const obj = JSON.parse(e.data);
-      //obj.uploadedRam;
-      masterReceivedChunks.push(originalDataArray);
+      // Create a new Uint8Array to represent the original data
+      masterReceivedChunks.push(new Uint8Array(combinedBuffer, 1));
     } else if(flag == 5) {
       console.log("Final flag received. Concatenating chunks...");
         
@@ -27332,7 +27460,8 @@ function putBlob(e) {
         payload: 1 // joiner netRole
       });
     } else if(flag == 7) {
-      slaveReceivedChunks.push(originalDataArray);
+      // Create a new Uint8Array to represent the original data
+      slaveReceivedChunks.push(new Uint8Array(combinedBuffer, 1));
     } else if(flag == 8) {
       console.log("Final flag received. Concatenating chunks...");
         
@@ -27391,21 +27520,21 @@ function sendFlagAndBuffer(flag, arrayBuffer, idx) {
   }
 
   if(flag == 2) {
-    const idxSize = 1; // Size of the index (8-bit integer)
+    const idxSize = 4; // Size of the index (32-bit integer)
     const combinedBufferSize = 1 + idxSize + bufferToSend.byteLength; // Include idx size
     const combinedBuffer = new ArrayBuffer(combinedBufferSize);
 
     // Create a DataView to write the address
     const dataView = new DataView(combinedBuffer);
     dataView.setUint8(0, flag, true); // Write the flag at the start of the buffer (little-endian)
-    dataView.setUint8(1, idx, true); // Set the idx after the flag (8-bit)
+    dataView.setUint32(1, idx, true); // Set the idx after the flag (8-bit)
 
     // Create a Uint8Array view of the combined buffer to copy the original ArrayBuffer
     const combinedArray = new Uint8Array(combinedBuffer);
     const originalArray = new Uint8Array(bufferToSend);
 
     // Copy the original ArrayBuffer data into the combined buffer
-    combinedArray.set(originalArray, 2); // Start copying after flag and idx
+    combinedArray.set(originalArray, 5); // Start copying after flag and idx
 
     return combinedArray;
   }
@@ -27438,8 +27567,8 @@ function saveAndDownload(combinedDataRtc, title) {
 }
 
 
-const blobQueue = new Queue();
-let slaveFrameIdx = 0;
+let blobQueue = new Queue();
+let slaveFrameIdx = -1;
 let isReceivedframeAck = false; 
 let waitRecvCount = 0;
 let waitingFrameAck = false;
@@ -27542,11 +27671,13 @@ function workerHandler(event) {
       break;
     case 'slaveImageData':
       const imageData = payload;
+      const snapShotIdx = time;
+
       if(processingPutImage == false) {
-        putImage(imageData);
+        putImage(imageData, snapShotIdx);
       } else {
-        blobQueue.enqueue(imageData);
-        saveMainLog(`imageData enqueued, blobQueue size: ${blobQueue.size()} lastIdx:${slaveFrameIdx}`);
+        blobQueue.enqueue({ imageData: imageData, snapShotIdx: snapShotIdx});
+        saveMainLog(`imageData enqueued, blobQueue size: ${blobQueue.size()} lastSnapShotIdx:${snapShotIdx}`);
       }
 
       break;
@@ -27561,15 +27692,7 @@ function workerHandler(event) {
       break;
     */
     case 'M':
-       /*
-          overhead simulation code
-      */
-     
-      worker.postMessage({
-        msg: 'restart',
-        payload: -1
-      });
-      
+      restartUpdate();
    
    
       /*
@@ -27599,20 +27722,57 @@ function workerHandler(event) {
   }
 }
 
+const keyInputQueue = new Queue();
 
-function putImage(imageData) {
+function restartUpdate() {
+  if(!keyInputQueue.isEmpty()) {
+    const { keyType, keyCode, keyFrameIdx } = keyInputQueue.dequeue();
+    
+    //console.log(`recv ${keyType} ${keyCode} ${keyFrameIdx}, ${keyInputQueue.size()}`);
+
+    /*
+        blobQueue 는 재귀적으로 다 소비할때까지 workerHandler 'M' 호출 되지 않을텐데. 
+        아니면 enqueue 하고 그 사이에 호출 될 수도 있겠다.
+    */
+    //frameQueue = new Queue();
+    blobQueue = new Queue();
+
+    worker.postMessage({
+      msg: 'restart',
+      payload: { 
+        frameIdx: keyFrameIdx, 
+        keyType: keyType, 
+        keyCode: keyCode 
+      }
+    });
+
+    return;
+  }
+
+  worker.postMessage({
+    msg: 'restart',
+    payload: { frameIdx: -1 }
+  });
+}
+
+
+function putImage(imageData, snapShotIdx) {
   processingPutImage = true;
 
   slaveCanvasCtx.putImageData(imageData, 0, 0);
 
+  /*
   slaveFrameIdx = (slaveFrameIdx + 1) % 256;
+  if(slaveFrameIdx != snapShotIdx) {
+    throw new Error(`different mainSnapIdx: ${slaveFrameIdx}, snapShotIdx: ${snapShotIdx}`);
+  }
+  */
 
-  frameQueue.enqueue(slaveFrameIdx);
-  isReceivedframeAck = false;
-  waitRecvCount++;
-  saveMainLog(`${slaveFrameIdx} slave putImage`);
+  //frameQueue.enqueue(snapShotIdx);
 
-  getBlob(slaveFrameIdx, performance.now());
+  saveMainLog(`${snapShotIdx} slave putImage`);
+
+  getBlob(snapShotIdx, performance.now());
 }
 
 function getBlob(currentFrameIdx, slaveFrameStart) {
@@ -27639,15 +27799,7 @@ function getBlob(currentFrameIdx, slaveFrameStart) {
               isReceivedframeAck = false;
               */
              _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(imgData);
-             saveMainLog(`sendFrameIdx ${currentFrameIdx},  lap: ${(performance.now() - slaveTimeLap).toFixed(3)}`);
-
-
-      
-              /*
-              const currentLap = performance.now();
-              console.log(`%c after sendImg call: ${(currentLap-sendimgLap).toFixed(3)}, blobIdx: ${time}`, "background:red; color:white")
-              sendimgLap = currentLap;
-              */
+             saveMainLog(`sendSnapShotIdx ${currentFrameIdx},  lap: ${(performance.now() - slaveTimeLap).toFixed(3)}`);
             }
 
         }).catch(error => {
@@ -27655,11 +27807,11 @@ function getBlob(currentFrameIdx, slaveFrameStart) {
         });
 
         processingPutImage = false;
-        const nextImageData = blobQueue.dequeue();
-        if(nextImageData != null) {
+
+        if(!blobQueue.isEmpty()) {
+          const { imageData, snapShotIdx} = blobQueue.dequeue();
           saveMainLog('dequeue!');
-          //console.log("dequeue!");
-          putImage(nextImageData);
+          putImage(imageData, snapShotIdx);
         }
       });
   } catch(error) {
@@ -27773,15 +27925,34 @@ function keyReceiver(keyType, keyCode) {
   }
 }
 
-let keySendBuffer = new Uint8Array(3);
+let keySendBuffer = new Uint8Array(7);
+const keyDataView = new DataView(keySendBuffer.buffer);
+function sendKey(keyCode, inputType) {
+  keySendBuffer[0] = 3;
+  keySendBuffer[1] = inputType;
+  keySendBuffer[2] = keyCode;
+  keyDataView.setUint32(3, recvSnapShotIdx, true);
+  if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger != null) {
+    //messenger.sendImg(sendFlagAndBuffer(3, keySendBuffer.buffer));
+    _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(keySendBuffer.buffer);
+    console.log(`%csendKey ${inputType} ${keyCode}, ${keyDataView.getUint32(3, true)} ${recvSnapShotIdx}`, 'background:blue;color:white');
+    saveMainLog(`sendKey ${inputType} ${keyCode}, ${keyDataView.getUint32(3, true)} ${recvSnapShotIdx}`)
+  }
+}
 
 function pressKey(keyDownCode, inputType) {
   keySendBuffer[0] = 3;
   keySendBuffer[1] = inputType;
   keySendBuffer[2] = keyDownCode;
+  keySendBuffer[3] = recvSnapShotIdx;
   if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger != null) {
     //messenger.sendImg(sendFlagAndBuffer(3, keySendBuffer.buffer));
     _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(keySendBuffer.buffer);
+
+    /*
+        delay queue init
+    */
+    //recvQueue = new Queue();
   }
 }
 
@@ -27789,6 +27960,7 @@ function releaseKey(keyUpCode, inputType) {
   keySendBuffer[0] = 3;
   keySendBuffer[1] = inputType;
   keySendBuffer[2] = keyUpCode;
+  keySendBuffer[3] =  recvSnapShotIdx;
   if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger != null) {
     //messenger.sendImg(sendFlagAndBuffer(3, keySendBuffer.buffer));
     _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.sendImg(keySendBuffer.buffer);
@@ -27810,13 +27982,15 @@ function keySender(ev) {
       }
 
       activeKeyNumbers.add(keyDownCode);
-      pressKey(keyDownCode, 0);
+      //pressKey(keyDownCode, 0);
+      sendKey(keyDownCode, 0);
       break;
     case 'keyup':
       const keyUpCode = keyValues[ev.code];
       if(activeKeyNumbers.has(keyUpCode)) {
         activeKeyNumbers.delete(keyUpCode);
-        releaseKey(keyUpCode, 1);
+        //releaseKey(keyUpCode, 1);
+        sendKey(keyUpCode, 1);
       }
       break;
     default:
@@ -28171,7 +28345,8 @@ function handleKeyActivation(divClass, key) {
   const keyNumber = parseInt(key, 10);
   if (!activeKeyNumbers.has(keyNumber)) {
     if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole == 1) {
-      pressKey(keyNumber, 2);
+      //pressKey(keyNumber, 2);
+      sendKey(keyNumber, 2);
     } else {
       masterContext.keyBuffer[keyNumber] = true;
     }
@@ -28187,7 +28362,8 @@ function deactivateKey(divClass, key) {
    const keyNumber = parseInt(key, 10);
    if (activeKeyNumbers.has(keyNumber)) {
       if(_rtc_js__WEBPACK_IMPORTED_MODULE_0__.netRole == 1) {
-        releaseKey(keyNumber, 3);
+        //releaseKey(keyNumber, 3);
+        sendKey(keyNumber, 3);
       } else {
         masterContext.keyBuffer[keyNumber] = false;
       }
@@ -28513,7 +28689,7 @@ function init() {
   connectedDialog = new _material_dialog__WEBPACK_IMPORTED_MODULE_5__.MDCDialog(document.querySelector('#connected-dialog'));
 
   document.querySelector('#printLogBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.printLogAll);
-  //document.querySelector('#pingCheckerBtn').addEventListener('click', pingChecker);
+  document.querySelector('#pingCheckerBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.pingChecker);
   document.querySelector('#saveFileBtn').addEventListener('click', _js_adapter_js__WEBPACK_IMPORTED_MODULE_3__.downloadSaveFile);
 }
 
@@ -28755,7 +28931,7 @@ async function hangUp(e) {
 
 function dataChannelOpened() {
   console.log('data channel opened!');
-  //document.querySelector('#pingCheckerBtn').disabled = false;
+  document.querySelector('#pingCheckerBtn').disabled = false;
   document.querySelector('#hangupBtn').disabled = false;
   document.querySelector('#copyBtn').disabled = true;
   console.log('maxMessageSize: ', peerConnection.sctp.maxMessageSize);

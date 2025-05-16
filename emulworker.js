@@ -15,9 +15,11 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./gb/cpu.js */ "./public/js/gb/cpu.js");
 /* harmony import */ var _gb_display_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./gb/display.js */ "./public/js/gb/display.js");
 /* harmony import */ var _orderlock_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./orderlock.js */ "./public/js/orderlock.js");
+/* harmony import */ var _gb_gbcontext_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./gb/gbcontext.js */ "./public/js/gb/gbcontext.js");
 
 
  // Adjust based on actual exports
+
 
 
 function saveEmulLog(...args) {
@@ -48,6 +50,10 @@ let runningState;
 let masterContext;
 let slaveContext;
 
+const SNAP_SHOT_SIZE = 120;
+const SNAP_SHOT_IDX_SIZE = 60 * 10; // 60 fps * 10s --> 1 바퀴 차이 나서 같은 인덱스면 10초 밀린 에러 상황임..
+let snapShotIdx = -1;
+
 self.onmessage = event => {
   const {msg, payload} = event.data;
 
@@ -64,21 +70,14 @@ self.onmessage = event => {
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.width = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.height = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight;
       _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx = _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvas.getContext('2d');
-
-      if(multiPlay) {
-        /*
-        Display.slaveCanvas = payload.slaveCanvas;
-        Display.slaveCanvas.width = Display.canvasWidth;
-        Display.slaveCanvas.height = Display.canvasHeight;
-        Display.slaveCtx = Display.slaveCanvas.getContext('2d');
-        */
-      }
   
       orderLock = _orderlock_js__WEBPACK_IMPORTED_MODULE_2__.OrderLock.connect(payload.orderLock);
 
       loadAndStart(payload.rom, masterContext, slaveContext, payload.bufferLen);
       break;
     case 'restart':
+      rollback(payload);
+
       const current = performance.now();
       const travelTime = current-past;
       const leftDelayTime = delayGap - travelTime;
@@ -142,6 +141,100 @@ self.onmessage = event => {
   }
 };
 
+
+let masterSnapShots = [];
+let slaveSnapShots = [];
+
+function saveSnapShot() {
+  
+  const cacheIdx = snapShotIdx % SNAP_SHOT_SIZE;
+
+  const masterGbContext = new _gb_gbcontext_js__WEBPACK_IMPORTED_MODULE_3__.GbContext();
+  gb.getSnapShot(masterGbContext);
+  masterSnapShots[cacheIdx] = masterGbContext;
+
+  const slaveGbContext = new _gb_gbcontext_js__WEBPACK_IMPORTED_MODULE_3__.GbContext();
+  gbSlave.getSnapShot(slaveGbContext);
+  slaveSnapShots[cacheIdx] = slaveGbContext;
+  
+}
+
+const MIN_ROLL_BACK_GAP = 10;
+
+function rollback(payload) {
+  const frameIdx = payload.frameIdx;
+  if(frameIdx < 0) { // just restart
+    return;
+  }
+
+  let frameDiff = 0;
+  if(snapShotIdx > frameIdx) {
+    frameDiff = snapShotIdx - frameIdx
+  } else if(snapShotIdx < frameIdx) {
+    frameDiff = (snapShotIdx + SNAP_SHOT_IDX_SIZE) - frameIdx;
+  }
+
+  if(frameDiff > MIN_ROLL_BACK_GAP) {
+
+    if(frameDiff >= SNAP_SHOT_SIZE) { // 모듈러 한 바뀌 돌아서 cache값 덮어씌여짐. 복구 못 함.
+      console.log(`%cnot rollback. The frameDiff ${frameDiff} is greater than the cache size ${SNAP_SHOT_SIZE}`, 'background:red;color:white');
+      saveEmulLog(`not rollback. The frameDiff ${frameDiff} is greater than the cache size ${SNAP_SHOT_SIZE}`);
+    } else if (frameDiff != 0) {
+      /*
+      rollback
+      */
+      const targetFrameIdx = frameIdx % SNAP_SHOT_SIZE;
+      // master
+      gb.setSnapShot(masterSnapShots[targetFrameIdx]);
+
+      // slave
+      gbSlave.setSnapShot(slaveSnapShots[targetFrameIdx]);
+
+      console.log(`%c${payload.keyType} ${payload.keyCode} rollback gap: ${frameDiff} recv: ${frameIdx}, current: ${snapShotIdx} to ${frameIdx}`, 'background:green;color:white');
+      saveEmulLog(`${payload.keyType} ${payload.keyCode} rollback gap: ${frameDiff} recv: ${frameIdx}, current: ${snapShotIdx} to ${frameIdx}`);
+
+      snapShotIdx = frameIdx;
+    } else { // ==
+      console.log(`%cnot rollback. frameDiff is ${frameDiff}`, 'background:red;color:white');
+      saveEmulLog(`not rollback. frameDiff is ${frameDiff}`);
+    }
+   
+  } else {
+    console.log(`%c${payload.keyType} ${payload.keyCode} not rollback, gap ${frameDiff} is under MIN ${MIN_ROLL_BACK_GAP}. recv: ${frameIdx}, current: ${snapShotIdx}`, 'background:orange;color:black');
+    saveEmulLog(`${payload.keyType} ${payload.keyCode} not rollback, gap ${frameDiff} is under MIN ${MIN_ROLL_BACK_GAP}. recv: ${frameIdx}, current: ${snapShotIdx}`);
+  }
+
+  /*
+    set key to the rollbacked slave context
+  */
+  keySetter(payload.keyType, payload.keyCode);
+}
+
+
+function keySetter(keyType, keyCode) {
+  switch (keyType) {
+    case 'touchstart':
+    case 'keydown':
+      if(keyCode == 6) {
+        gbSlave.joypad._key[7] = false;
+      } else if(keyCode == 7) {
+        gbSlave.joypad._key[6] = false;
+      } else if(keyCode == 4) {
+        gbSlave.joypad._key[5] = false;
+      } else if(keyCode == 5) {
+        gbSlave.joypad._key[4] = false;
+      }
+      gbSlave.joypad._key[keyCode] = true;
+      break;
+    case 'touchend':
+    case 'keyup':
+      gbSlave.joypad._key[keyCode] = false;
+      break;
+    default:
+  }
+}
+
+
 let gb;
 let gbSlave;
 let cycles;
@@ -192,14 +285,18 @@ function noDelayUpdate() {
   _gb_cpu_js__WEBPACK_IMPORTED_MODULE_0__.GameBoy.startTime = startTime;
   const gap0 = startTime - past;
   //saveLog("start time: ", startTime.toFixed(3));
+
+  snapShotIdx = ( snapShotIdx + 1 ) % SNAP_SHOT_IDX_SIZE;
   
   //console.log(`%c[GAP0] {  e}__{s      }   =  ${gap0.toFixed(3)}`, "background:blue;color:white");
-  saveEmulLog("[GAP0] {  e}__{s      }   = " + gap0.toFixed(3));
-
+  saveEmulLog(`[GAP0] {  e}__{s      }   = ${gap0.toFixed(3)}, snapShotIdx: ${snapShotIdx}`);
 
   if (paused || (Atomics.load(runningState, 0) == 0)) {//!running) {
       return;
   }
+
+  
+
   if (gb.cartridge.hasRTC) {
       gb.cartridge.rtc.updateTime();
   }
@@ -370,12 +467,13 @@ function noDelayUpdate() {
           return;
       }
   }
+
+  saveSnapShot();
     
   cycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;
   if(multiPlay) {
     slaveCycles -= _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.cpuCyclesPerFrame;  
   }
-  
   
   if(cycles != slaveCycles) {
     //console.log(`%cmasterCycles: ${cycles}, slaveCycles: ${slaveCycles}`,"background:blue; color:white;");
@@ -398,18 +496,6 @@ function noDelayUpdate() {
 
     saveEmulLog("[GAP1]        {s_____e}   = " + gap1.toFixed(3) + " loopCnt: " + loopCnt);
 
-    //updateCount++;
-    /*
-    if(gap1 > 16.74) {
-      console.log(`%c[GAP1]        {s_____e}   = ${gap1.toFixed(3)},  ${slaveBlobArrayBufferSize}`, "background:red;");
-    } else {
-      console.log(`%c[GAP1]        {s_____e}   = ${gap1.toFixed(3)}, ${slaveBlobArrayBufferSize}`, "background:green;");
-    }
-    saveEmulLog("[GAP1]        {s_____e}   = " + gap1.toFixed(3));
-    */
-
-    //console.log(`%c[GAP1]        {s_____e}   = ${gap1.toFixed(3)}`, "background:red;");
-
   
     if(fps > 59) { //  if(gap1 > 16.74) {
       saveLog(fps + " fps over 59, reset old delay 0");
@@ -427,21 +513,7 @@ function noDelayUpdate() {
       return;
     }
 
-    /*
-    const intervalPoint = Math.floor((current-firstNext)/Display.frameInterval) * Display.frameInterval + firstNext;
-    if((current - next) >= (intervalPoint + Display.frameInterval - current)) {
-      isInitUpdate = true;
-    }
-    */
-  
-    /*
-    if(isInitUpdate) {
-      console.log("init");
-      isInitUpdate = false;
-      next = Math.floor((current-firstNext)/Display.frameInterval) * Display.frameInterval + firstNext;
-      //next = intervalPoint;
-    }
-    */
+
     if(isInitUpdate) {
       return;
     }
@@ -457,7 +529,6 @@ function noDelayUpdate() {
 }
 
 let printOld;
-let restartUpdate = false;
 
 function printFps() {
   const current = performance.now();
@@ -470,7 +541,6 @@ function printFps() {
   //self.postMessage({msg: 'F', payload: letter, time:isSame});
   //self.postMessage({msg: 'F', payload: fps, time:true});
 
-  //console.log(`master FPS: ${masterFps}, slave FPS: ${slaveFps}`);
   const dualFps = masterFps;//fps + " M:" + masterFps;// + " S:";// + slaveFps;
   //console.log(`master renderCpuCycles: ${gb.display.renderCpuCycles}, slave : ${gbSlave.display.renderCpuCycles}`);
 
@@ -479,11 +549,10 @@ function printFps() {
   saveLog("%c FPS= " + letter, "background:cyan; color:black");
   saveLog("%c 1 sec= " + setIntGap, "background:cyan; color:red");
 
-  //saveEmulLog("updateCount " + fps + " masterFPS: " + masterFps + " slaveFPS: " + slaveFps);
   //console.log(letter);
 
   masterFps = 0;
-  slaveFps = 0;
+ 
   //Display.fps = 0;
   fps = 0;
   printOld = current;
@@ -494,24 +563,23 @@ function printFps() {
     saveEmulLog("init");
     isInitUpdate = false;
     next = Math.floor((current-firstNext)/_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval) * _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval + firstNext;
+    
     next += _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.frameInterval;
     delayGap = next - current;
-    setTimeout(noDelayUpdate, delayGap);
+    //setTimeout(noDelayUpdate, delayGap);
+    self.postMessage({
+      msg: 'M',
+      payload: -1,
+      time: -1
+    });
   }
 }
 
 let fpsInterval;
-let blobIdx = 0;
-let slaveBlobArrayBufferSize = 0;
 
 let masterFps = 0;
-let slaveFps = 0;
 
 let masterFrameIdx = 0;
-let slaveFrameIdx = 0;
-
-let masterFpsPeriod = 0;
-let slaveFpsPeriod = 0;
 
 
 function loadAndStart(rom, masterContext, slaveContext, bufferLen) {
@@ -524,11 +592,9 @@ function loadAndStart(rom, masterContext, slaveContext, bufferLen) {
   );
   gb.display.setImageData(_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx.createImageData(_gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasWidth, _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.canvasHeight));
   gb.display.renderFrameCallback = (imageData) => { 
-    //const current = performance.now();
+
     _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.ctx.putImageData(imageData, 0, 0);
-    //saveEmulLog("master putImage");
-    //console.log(`%cmaster putImage ${(current - masterFpsPeriod).toFixed(3)}`, "background:orange");
-    //masterFpsPeriod = current;
+
     masterFps++;
     masterFrameIdx = (masterFrameIdx + 1) % 256;
   }
@@ -551,19 +617,7 @@ function loadAndStart(rom, masterContext, slaveContext, bufferLen) {
     // Create a Uint8ClampedArray for the pixel data
     const pixelData = new Uint8ClampedArray(width * height * 4); // 4 values per pixel (RGBA)
 
-    // Fill pixelData with your image data here
-    // For example, setting all pixels to red with full opacity
-    /*
-    for (let i = 0; i < pixelData.length; i += 4) {
-        pixelData[i] = 0;     // Red
-        pixelData[i + 1] = 0;   // Green
-        pixelData[i + 2] = 0;   // Blue
-        pixelData[i + 3] = 0; // Alpha
-    }
-    */
-
     gbSlave.display.setImageData(new ImageData(pixelData, width, height));
-    //gbSlave.display.setImageData(Display.slaveCtx.createImageData(Display.canvasWidth, Display.canvasHeight));
     gbSlave.display.renderFrameCallback = (imageData) => { 
 
       const copiedImageData = new ImageData(
@@ -575,23 +629,8 @@ function loadAndStart(rom, masterContext, slaveContext, bufferLen) {
       self.postMessage({
         msg: 'slaveImageData',
         payload: copiedImageData,
-        time: -1
+        time: snapShotIdx
       });
-
-      /*
-      if(processingPutImage == false) {
-        putImage(imageData);
-      } else {
-        const copiedImageData = new ImageData(
-          new Uint8ClampedArray(imageData.data), // Create a new Uint8ClampedArray from the original data
-          imageData.width,
-          imageData.height
-        );
-        blobQueue.enqueue(copiedImageData);
-        saveEmulLog(`imageData enqueued, blobQueue size: ${blobQueue.size()} lastIdx:${slaveFrameIdx}`);
-        //console.log(`%c imageData enqueued, blobQueue size: ${blobQueue.size()} lastIdx:${slaveFrameIdx}`, 'background:pink');
-      }
-      */
 
     };
 
@@ -612,112 +651,6 @@ function loadAndStart(rom, masterContext, slaveContext, bufferLen) {
     console.error(error);
   }
 }
-
-let processingPutImage = false;
-
-function putImage(imageData) {
-  processingPutImage = true;
-
-  _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCtx.putImageData(imageData, 0, 0);
-
-  slaveFrameIdx = (slaveFrameIdx + 1) % 256;
-
-  self.postMessage({
-    msg: 'slaveFrame',
-    payload: -1,
-    time: slaveFrameIdx + " " + masterFrameIdx
-  });
-  
-  //console.log(`${slaveFrameIdx} slave putImage`);
-
-  getBlob(slaveFrameIdx);
-}
-
-function getBlob(currentFrameIdx) {
-  try {
-    _gb_display_js__WEBPACK_IMPORTED_MODULE_1__.Display.slaveCanvas.convertToBlob({ type: 'image/png' }).then((blob) => 
-    {
-      // Convert Blob to ArrayBuffer
-        blobToArrayBuffer(blob).then((arrayBuffer) => {
-        
-            slaveBlobArrayBufferSize = arrayBuffer.byteLength;
-
-            saveEmulLog(`${currentFrameIdx} make blob`);
-            //console.log(`${currentFrameIdx} make blob`); // Use the stored frameIdx
-          
-            self.postMessage({
-                msg: 'img',
-                payload: arrayBuffer,
-                time: currentFrameIdx + " " + masterFrameIdx // Use the stored frameIdx
-            });
-
-        }).catch(error => {
-            console.error("ArrayBuffer conversion failed:", error);
-        });
-
-        processingPutImage = false;
-        const nextImageData = blobQueue.dequeue();
-        if(nextImageData != null) {
-          saveEmulLog('dequeue!');
-          //console.log("dequeue!");
-          putImage(nextImageData);
-        }
-      });
-  } catch(error) {
-    console.error("Blob creation failed:", error);
-  }
-}
-
-class Queue {
-  constructor() {
-      this.items = [];
-  }
-
-  // Add an item to the queue
-  enqueue(item) {
-      this.items.push(item);
-  }
-
-  // Remove and return the first item from the queue
-  dequeue() {
-      if (this.isEmpty()) {
-          return null; // or throw an error
-      }
-      return this.items.shift();
-  }
-
-  // Check if the queue is empty
-  isEmpty() {
-      return this.items.length === 0;
-  }
-
-  // Return the size of the queue
-  size() {
-      return this.items.length;
-  }
-
-  // Peek at the first item in the queue without removing it
-  peek() {
-      if (this.isEmpty()) {
-          throw new Error("queue is empty at peek");
-      }
-      return this.items[0];
-  }
-}
-
-const blobQueue = new Queue();
-
-
-// Helper function to convert Blob to ArrayBuffer
-function blobToArrayBuffer(blob) {
-  return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsArrayBuffer(blob);
-  });
-}
-
 
 function playGame() {
   Atomics.store(runningState, 0, 1);
@@ -749,6 +682,46 @@ __webpack_require__.r(__webpack_exports__);
 class Cartridge {
     constructor(gb) {
         this.gb = gb;
+    }
+
+    getSnapShot(gbContext) {
+        gbContext.title = this.title;
+        gbContext.cartridgeType = this.cartridgeType;
+        gbContext.rom = this.rom;
+        gbContext.romBankNumber = this.romBankNumber;
+        gbContext.ram = this.ram;
+        gbContext.ramBankNumber = this.ramBankNumber;
+        gbContext.ramEnable = this.ramEnable;
+        gbContext.ramBankMode = this.ramBankMode;
+        gbContext.hasRAM = this.hasRAM;
+        gbContext.hasBattery = this.hasBattery;
+        gbContext.hasRTC = this.hasRTC;
+        gbContext.irSelect = this.irSelect;
+        gbContext.irOn = this.irOn;
+        if(this.hasRTC) {
+            gbContext.rtc = this.rtc;
+            this.rtc.getSnapShot(gbContext);
+        }
+    }
+
+    setSnapShot(gbContext) {
+        this.title = gbContext.title;
+        this.cartridgeType = gbContext.cartridgeType;
+        this.rom = gbContext.rom;
+        this.romBankNumber = gbContext.romBankNumber;
+        this.ram = gbContext.ram;
+        this.ramBankNumber = gbContext.ramBankNumber;
+        this.ramEnable = gbContext.ramEnable;
+        this.ramBankMode = gbContext.ramBankMode;
+        this.hasRAM = gbContext.hasRAM;
+        this.hasBattery = gbContext.hasBattery;
+        this.hasRTC = gbContext.hasRTC;
+        this.irSelect = gbContext.irSelect;
+        this.irOn = gbContext.irOn;
+        if(this.hasRTC) {
+            this.rtc = gbContext.rtc;
+            this.rtc.setSnapShot(gbContext);
+        }
     }
 
     readROM(address) {
@@ -1281,6 +1254,78 @@ class GameBoy {
     this.cycles = 0;
 
     this.serialHandler = false;
+  }
+
+  getSnapShot(gbContext) {
+    gbContext.a = this.a;
+    gbContext.fz = this.fz;
+    gbContext.fn = this.fn;
+    gbContext.fh = this.fh;
+    gbContext.fc = this.fc;
+    gbContext.b = this.b;
+    gbContext.c = this.c;
+    gbContext.d = this.d;
+    gbContext.e = this.e;
+    gbContext.h = this.h;
+    gbContext.l = this.l;
+    gbContext._pc = this._pc;
+    gbContext._sp = this._sp;
+    gbContext.ime = this.ime;
+    gbContext.halt = this.halt;
+    gbContext._if = this._if;
+    gbContext._ie = this._ie;
+    gbContext._svbk = this._svbk;
+    gbContext.doubleSpeed = this.doubleSpeed;
+    gbContext.speedTrigger = this.speedTrigger;
+    gbContext.irReadEnable = this.irReadEnable;
+    gbContext.irOn = this.irOn;
+    gbContext.wram = new Uint8Array(this.wram);
+    gbContext.hram = new Uint8Array(this.hram);
+    gbContext.cgb = this.cgb;
+    gbContext.cpuCycles = this.cycles;
+
+    this.display.getSnapShot(gbContext);
+    this.timer.getSnapShot(gbContext);
+    this.joypad.getSnapShot(gbContext);
+    this.cartridge.getSnapShot(gbContext);
+    this.sound.getSnapShot(gbContext);
+    this.serial.getSnapShot(gbContext);  
+  }
+
+  setSnapShot(gbContext) {
+    this.a = gbContext.a;
+    this.fz = gbContext.fz;
+    this.fn = gbContext.fn;
+    this.fh = gbContext.fh;
+    this.fc = gbContext.fc;
+    this.b = gbContext.b;
+    this.c = gbContext.c;
+    this.d = gbContext.d;
+    this.e = gbContext.e;
+    this.h = gbContext.h;
+    this.l = gbContext.l;
+    this._pc = gbContext._pc;
+    this._sp = gbContext._sp;
+    this.ime = gbContext.ime;
+    this.halt = gbContext.halt;
+    this._if = gbContext._if;
+    this._ie = gbContext._ie;
+    this._svbk = gbContext._svbk;
+    this.doubleSpeed = gbContext.doubleSpeed;
+    this.speedTrigger = gbContext.speedTrigger;
+    this.irReadEnable = gbContext.irReadEnable;
+    this.irOn = gbContext.irOn;
+    this.wram = new Uint8Array(gbContext.wram);
+    this.hram = new Uint8Array(gbContext.hram);
+    this.cgb = gbContext.cgb;
+    this.cycles = gbContext.cpuCycles;
+
+    this.display.setSnapShot(gbContext);
+    this.timer.setSnapShot(gbContext);
+    this.joypad.setSnapShot(gbContext);
+    this.cartridge.setSnapShot(gbContext);
+    this.sound.setSnapShot(gbContext);
+    this.serial.setSnapShot(gbContext);
   }
 
   get name() {
@@ -2660,6 +2705,124 @@ class Display {
         this.fpsPeriod = 0;
     }
 
+    getSnapShot(gbContext) {
+        gbContext.lcdOn = this.lcdOn;
+        gbContext.windowTilemap = this.windowTilemap;
+        gbContext.windowOn = this.windowOn;
+        gbContext.bgWindowTileMode = this.bgWindowTileMode;
+        gbContext.bgTilemap = this.bgTilemap;
+        gbContext.objHeight = this.objHeight;
+        gbContext.objOn = this.objOn;
+        gbContext.bgOn = this.bgOn;
+        gbContext.lycMatchInt = this.lycMatchInt;
+        gbContext.mode10Int = this.mode10Int;
+        gbContext.mode01Int = this.mode01Int;
+        gbContext.mode00Int = this.mode00Int;
+        gbContext.lycMatch = this.lycMatch;
+        gbContext.mode = this.mode;
+        gbContext.scy = this.scy;
+        gbContext.scx = this.scx;
+        gbContext.ly = this.ly;
+        gbContext.lyc = this.lyc;
+        gbContext._bgp = this._bgp;
+        gbContext._obp0 = this._obp0;
+        gbContext._obp1 = this._obp1;
+        gbContext.bgPalette = structuredClone(this.bgPalette);
+        gbContext.scy = this.scy;
+        gbContext.scx = this.scx;
+        gbContext.ly = this.ly;
+        gbContext.lyc = this.lyc;
+        gbContext._bgp = this._bgp;
+        gbContext._obp0 = this._obp0;
+        gbContext._obp1 = this._obp1;
+        gbContext.bgPalette = structuredClone(this.bgPalette);
+        gbContext.objPalette = structuredClone(this.objPalette);
+        gbContext.bgColorIndex = this.bgColorIndex;
+        gbContext.bgColorInc = this.bgColorInc;
+        gbContext.objColorIndex = this.objColorIndex;
+        gbContext.objColorInc = this.objColorInc;
+        gbContext._bcpd = new Uint8Array(this._bcpd);
+        gbContext._ocpd = new Uint8Array(this._ocpd);
+        gbContext.bgColorPalette = structuredClone(this.bgColorPalette);
+        gbContext.objColorPalette = structuredClone(this.objColorPalette);
+        gbContext.wy = this.wy;
+        gbContext.wx = this.wx;
+        gbContext._vbk = this._vbk;
+        gbContext.hdmaSrc = this.hdmaSrc;
+        gbContext.hdmaDst = this.hdmaDst;
+        gbContext._hdma5 = this._hdma5;
+        gbContext.hdmaOn = this.hdmaOn;
+        gbContext.hblankHdmaOn = this.hblankHdmaOn;
+        gbContext.hdmaTrigger = this.hdmaTrigger;
+        gbContext.hdmaCounter = this.hdmaCounter;
+        gbContext.displayCycles = this.cycles;
+        gbContext.windowLine = this.windowLine;
+        gbContext.statInterrupt = this.statInterrupt;
+        gbContext.vram = new Uint8Array(this.vram);
+        gbContext.oam = new Uint8Array(this.oam);
+        gbContext.bgClear = new Uint8Array(this.bgClear);
+        gbContext.bgPriority = new Uint8Array(this.bgPriority);
+    }
+
+    setSnapShot(gbContext) {
+        this.lcdOn = gbContext.lcdOn;
+        this.windowTilemap = gbContext.windowTilemap;
+        this.windowOn = gbContext.windowOn;
+        this.bgWindowTileMode = gbContext.bgWindowTileMode;
+        this.bgTilemap = gbContext.bgTilemap;
+        this.objHeight = gbContext.objHeight;
+        this.objOn = gbContext.objOn;
+        this.bgOn = gbContext.bgOn;
+        this.lycMatchInt = gbContext.lycMatchInt;
+        this.mode10Int = gbContext.mode10Int;
+        this.mode01Int = gbContext.mode01Int;
+        this.mode00Int = gbContext.mode00Int;
+        this.lycMatch = gbContext.lycMatch;
+        this.mode = gbContext.mode;
+        this.scy = gbContext.scy;
+        this.scx = gbContext.scx;
+        this.ly = gbContext.ly;
+        this.lyc = gbContext.lyc;
+        this._bgp = gbContext._bgp;
+        this._obp0 = gbContext._obp0;
+        this._obp1 = gbContext._obp1;
+        this.bgPalette = structuredClone(gbContext.bgPalette);
+        this.scy = gbContext.scy;
+        this.scx = gbContext.scx;
+        this.ly = gbContext.ly;
+        this.lyc = gbContext.lyc;
+        this._bgp = gbContext._bgp;
+        this._obp0 = gbContext._obp0;
+        this._obp1 = gbContext._obp1;
+        this.bgPalette = structuredClone(gbContext.bgPalette);
+        this.objPalette = structuredClone(gbContext.objPalette);
+        this.bgColorIndex = gbContext.bgColorIndex;
+        this.bgColorInc = gbContext.bgColorInc;
+        this.objColorIndex = gbContext.objColorIndex;
+        this.objColorInc = gbContext.objColorInc;
+        this._bcpd = new Uint8Array(gbContext._bcpd);
+        this._ocpd = new Uint8Array(gbContext._ocpd);
+        this.bgColorPalette = structuredClone(gbContext.bgColorPalette);
+        this.objColorPalette = structuredClone(gbContext.objColorPalette);
+        this.wy = gbContext.wy;
+        this.wx = gbContext.wx;
+        this._vbk = gbContext._vbk;
+        this.hdmaSrc = gbContext.hdmaSrc;
+        this.hdmaDst = gbContext.hdmaDst;
+        this._hdma5 = gbContext._hdma5;
+        this.hdmaOn = gbContext.hdmaOn;
+        this.hblankHdmaOn = gbContext.hblankHdmaOn;
+        this.hdmaTrigger = gbContext.hdmaTrigger;
+        this.hdmaCounter = gbContext.hdmaCounter;
+        this.cycles = gbContext.displayCycles;
+        this.windowLine = gbContext.windowLine;
+        this.statInterrupt = gbContext.statInterrupt;
+        this.vram = new Uint8Array(gbContext.vram);
+        this.oam = new Uint8Array(gbContext.oam);
+        this.bgClear = new Uint8Array(gbContext.bgClear);
+        this.bgPriority = new Uint8Array(gbContext.bgPriority);
+    }
+
     get renderCpuCycles() {
         return this._renderCpuCycles;
     }
@@ -3232,6 +3395,229 @@ Display.renderCpuCycles = 0;
 
 /***/ }),
 
+/***/ "./public/js/gb/gbcontext.js":
+/*!***********************************!*\
+  !*** ./public/js/gb/gbcontext.js ***!
+  \***********************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   GbContext: () => (/* binding */ GbContext)
+/* harmony export */ });
+class GbContext {
+    constructor() {
+        //rtc
+        this.time = 0;
+        this._latch = false;
+        this.sec = 0;
+        this.min = 0;
+        this.hour = 0;
+        this.day = 0;
+        this.high = 0;
+        this.secLatch = 0;
+        this.minLatch = 0;
+        this.hourLatch = 0;
+        this.dayLatch = 0;
+        this.highLatch = 0;
+
+        // cpu;
+        this.a = 0;
+        this.fz = false;
+        this.fn = false;
+        this.fh = false;
+        this.fc = false;
+        this.b = 0;
+        this.c = 0;
+        this.d = 0;
+        this.e = 0;
+        this.h = 0;
+        this.l = 0;
+        this._pc = 0x0100;
+        this._sp = 0xfffe;
+        this.ime = false;
+        this.halt = false;
+        this._if = 0;
+        this._ie = 0;
+        this._svbk = 0;
+        this.doubleSpeed = false;
+        this.speedTrigger = false;
+        this.irReadEnable = 0;
+        this.irOn = false;
+        this.wram;//new Uint8Array(0x8000);
+        this.hram;//new Uint8Array(0x7f);
+        this.cgb = false;
+        this.cpuCycles = 0;
+
+        //diplay
+        this.lcdOn = true;
+        this.windowTilemap = false;
+        this.windowOn = false;
+        this.bgWindowTileMode = true;
+        this.bgTilemap = false;
+        this.objHeight = false;
+        this.objOn = false;
+        this.bgOn = true;
+        this.lycMatchInt = false;
+        this.mode10Int = false;
+        this.mode01Int = false;
+        this.mode00Int = false;
+        this.lycMatch = false;
+        this.mode = 0;
+        this.scy = 0;
+        this.scx = 0;
+        this.ly = 0;
+        this.lyc = 0;
+        this._bgp = 0;
+        this._obp0 = 0;
+        this._obp1 = 0;
+        this.bgPalette;// = [0, 0, 0, 0];
+        this.objPalette;// = [[0, 0, 0, 0], [0, 0, 0, 0]];
+        this.bgColorIndex = 0;
+        this.bgColorInc = false;
+        this.objColorIndex = 0;
+        this.objColorInc = false;
+        this._bcpd;// = new Uint8Array(0x40);
+        this._ocpd;// = new Uint8Array(0x40);
+        this.bgColorPalette;// = Array.from({ length: 8 }, () => [0, 0, 0, 0]);
+        this.objColorPalette;// = Array.from({ length: 8 }, () => [0, 0, 0, 0]);
+        this.wy = 0;
+        this.wx = 0;
+        this._vbk = 0;
+        this.hdmaSrc = 0;
+        this.hdmaDst = 0;
+        this._hdma5 = 0;
+        this.hdmaOn = false;
+        this.hblankHdmaOn = false;
+        this.hdmaTrigger = false;
+        this.hdmaCounter = 0;
+        this.displayCycles = 0;
+        this.windowLine = 0;
+        this.statInterrupt = false;
+        this.vram;// = new Uint8Array(0x4000);
+        this.oam;// = new Uint8Array(0xa0);
+        this.bgClear;// = new Uint8Array(Display.width);
+        this.bgPriority;// = new Uint8Array(Display.width);
+
+
+        //timer
+        this._div = 0;
+        this._tima = 0;
+        this._tma = 0;
+        this.timerEnable = false;
+        this.clockSelect = 0;
+        this.overflow = false;
+
+
+        //joypad
+        this._p1 = 0;
+        this._key = new Int32Array(8);
+
+
+        //cartridge
+        this.title = '';
+        this.cartridgeType = null;
+        this.rom = null;
+        this.romBankNumber = 0;
+        this.ram = null;
+        this.ramBankNumber = 0;
+        this.ramEnable = false;
+        this.ramBankMode = false;
+        this.hasRAM = false;
+        this.hasBattery = false;
+        this.hasRTC = false;
+        this.irSelect = false;
+        this.irOn = false;
+        this.rtc = null;
+
+
+        //sound
+        this.frame = 0;
+        this.channel1Enable = false;
+        this.channel2Enable = false;
+        this.channel3Enable = false;
+        this.channel4Enable = false;
+        this.channel1SweepDuration = 0;
+        this.channel1SweepDown = false;
+        this.channel1SweepShift = 0;
+        this.channel1SweepEnable = false;
+        this.channel1Duty = 0;
+        this.channel1InitialVolume = 0;
+        this.channel1VolumeUp = false;
+        this.channel1EnvelopeDuration = 0;
+        this.channel1Frequency = 0;
+        this.channel1Trigger = false;
+        this.channel1LengthEnable = false;
+        this.channel2Duty = 0;
+        this.channel2InitialVolume = 0;
+        this.channel2VolumeUp = false;
+        this.channel2EnvelopeDuration = 0;
+        this.channel2Frequency = 0;
+        this.channel2Trigger = false;
+        this.channel2LengthEnable = false;
+        this.channel3Play = false;
+        this.channel3Volume = 0;
+        this.channel3Frequency = 0;
+        this.channel3Trigger = false;
+        this.channel3LengthEnable = false;
+        this.channel4InitialVolume = 0;
+        this.channel4VolumeUp = false;
+        this.channel4EnvelopeDuration = 0;
+        this.channel4ShiftClockFrequency = 0;
+        this.channel4CounterStep = false;
+        this.channel4DivisionRatio = 0;
+        this.channel4Trigger = false;
+        this.channel4LengthEnable = false;
+        this.outputVinRight = false;
+        this.rightVolume = 0;
+        this.outputVinLeft = false;
+        this.leftVolume = 0;
+        this.channel1LeftEnable = false;
+        this.channel2LeftEnable = false;
+        this.channel3LeftEnable = false;
+        this.channel4LeftEnable = false;
+        this.channel1RightEnable = false;
+        this.channel2RightEnable = false;
+        this.channel3RightEnable = false;
+        this.channel4RightEnable = false;
+
+        this.channel1SweepFrequency = 0;
+        this.channel1Index = 0;
+        this.channel1EnvelopeCounter = 0;
+        this.channel4LFSR = 0;
+        this.channel1LengthCounter = 0;
+        this.channel2LengthCounter = 0;
+        this.channel3LengthCounter = 0;
+        this.channel4LengthCounter = 0;
+        this.channel1SweepCounter = 0;
+        this.soundEnable = false;
+        this.channel3WaveTable;// = new Array(32).fill(0);
+        this.soundCycles = 0;
+
+        /*
+        this.limiter;// = (this.bufferLen * Sound.cyclesPerSample);
+        this.filled;// = new Int32Array(fillSab);
+        this.bufferLeft;// = new Float32Array(soundLeftSab);
+        this.bufferRight;// = new Float32Array(soundRightSab);
+        this.slaveBuffer;// = new Float32Array(Sound.bufferSamples * 2);
+        this.bufferLen;// = bufferLen;
+        this.genCount = 0;
+        this.cnt = 0;
+        this.soundIdx = 0;
+        */
+
+
+        //serial
+        this._sb = 0;
+        this._sc = 0;
+        this.transferInProgress = false;
+        this.divider = 0;
+
+    }
+}
+
+/***/ }),
+
 /***/ "./public/js/gb/joypad.js":
 /*!********************************!*\
   !*** ./public/js/gb/joypad.js ***!
@@ -3249,20 +3635,16 @@ class Joypad {
         this._p1 = 0;
 
         this._key = new Int32Array(keySharedBuffer);
-
-/*        this.start = false; //0  Enter
-        this.select = false; //1 ShiftRight
-        this.b = false;//2 KeyZ
-        this.a = false;//3 KeyX
-
-        this.down = false;//4  ArrowDown
-        this.up = false;//5  ArrowUp
-        this.left = false;//6  ArrowLeft
-        this.right = false;//7  ArrowRight*/
     }
 
-    set a(value) {
-        this._key[3] = value;
+    getSnapShot(gbContext) {
+        gbContext._p1 = this._p1;
+        gbContext._key.set(this._key);
+    }
+
+    setSnapShot(gbContext) {
+        this._p1 = gbContext._p1;
+        this._key.set(gbContext._key);
     }
 
     get p1() {
@@ -3277,6 +3659,7 @@ class Joypad {
                 return 0xff;
         }
     }
+    
 
     set p1(value) {
         this._p1 = (value & 0x30) >> 4;
@@ -3313,6 +3696,36 @@ class RTC {
         this.hourLatch = 0;
         this.dayLatch = 0;
         this.highLatch = 0;
+    }
+
+    getSnapShot(gbContext) {
+        gbContext.time = this.time;
+        gbContext._latch = this._latch;
+        gbContext.sec = this.sec;
+        gbContext.min = this.min;
+        gbContext.hour = this.hour;
+        gbContext.day = this.day;
+        gbContext.high = this.high;
+        gbContext.secLatch = this.secLatch;
+        gbContext.minLatch = this.minLatch;
+        gbContext.hourLatch = this.hourLatch;
+        gbContext.dayLatch = this.dayLatch;
+        gbContext.highLatch = this.highLatch;
+    }
+
+    setSnapShot(gbContext) {
+        this.time = gbContext.time;
+        this._latch = gbContext._latch;
+        this.sec = gbContext.sec;
+        this.min = gbContext.min;
+        this.hour = gbContext.hour;
+        this.day = gbContext.day;
+        this.high = gbContext.high;
+        this.secLatch = gbContext.secLatch;
+        this.minLatch = gbContext.minLatch;
+        this.hourLatch = gbContext.hourLatch;
+        this.dayLatch = gbContext.dayLatch;
+        this.highLatch = gbContext.highLatch;
     }
 
     set latch(value) {
@@ -3474,6 +3887,21 @@ class Serial {
     this.divider = 0;
   }
 
+  getSnapShot(gbContext) {
+    gbContext._sb = this._sb;
+    gbContext._sc = this._sc;
+    gbContext.transferInProgress = this.transferInProgress;
+    gbContext.divider = this.divider;
+  }
+
+  setSnapShot(gbContext) {
+    this._sb = gbContext._sb;
+    this._sc = gbContext._sc;
+    this.transferInProgress = gbContext.transferInProgress;
+    this.divider = gbContext.divider;
+  }
+
+
   get sb() {
     //saveEmulLog("<< get sb ", this._sb);
     return this._sb;
@@ -3634,6 +4062,148 @@ class Sound {
         this.cnt = 0;
 
         this.soundIdx = 0;
+    }
+
+    getSnapShot(gbContext) {
+        gbContext.frame = this.frame;
+        gbContext.channel1Enable = this.channel1Enable;
+        gbContext.channel2Enable = this.channel2Enable;
+        gbContext.channel3Enable = this.channel3Enable;
+        gbContext.channel4Enable = this.channel4Enable;
+        gbContext.channel1SweepDuration = this.channel1SweepDuration;
+        gbContext.channel1SweepDown = this.channel1SweepDown;
+        gbContext.channel1SweepShift = this.channel1SweepShift;
+        gbContext.channel1SweepEnable = this.channel1SweepEnable;
+        gbContext.channel1Duty = this.channel1Duty;
+        gbContext.channel1InitialVolume = this.channel1InitialVolume;
+        gbContext.channel1VolumeUp = this.channel1VolumeUp;
+        gbContext.channel1EnvelopeDuration = this.channel1EnvelopeDuration;
+        gbContext.channel1Frequency = this.channel1Frequency;
+        gbContext.channel1Trigger = this.channel1Trigger;
+        gbContext.channel1LengthEnable = this.channel1LengthEnable;
+        gbContext.channel2Duty = this.channel2Duty;
+        gbContext.channel2InitialVolume = this.channel2InitialVolume;
+        gbContext.channel2VolumeUp = this.channel2VolumeUp;
+        gbContext.channel2EnvelopeDuration = this.channel2EnvelopeDuration;
+        gbContext.channel2Frequency = this.channel2Frequency;
+        gbContext.channel2Trigger = this.channel2Trigger;
+        gbContext.channel2LengthEnable = this.channel2LengthEnable;
+        gbContext.channel3Play = this.channel3Play;
+        gbContext.channel3Volume = this.channel3Volume;
+        gbContext.channel3Frequency = this.channel3Frequency;
+        gbContext.channel3Trigger = this.channel3Trigger;
+        gbContext.channel3LengthEnable = this.channel3LengthEnable;
+        gbContext.channel4InitialVolume = this.channel4InitialVolume;
+        gbContext.channel4VolumeUp = this.channel4VolumeUp;
+        gbContext.channel4EnvelopeDuration = this.channel4EnvelopeDuration;
+        gbContext.channel4ShiftClockFrequency = this.channel4ShiftClockFrequency;
+        gbContext.channel4CounterStep = this.channel4CounterStep;
+        gbContext.channel4DivisionRatio = this.channel4DivisionRatio;
+        gbContext.channel4Trigger = this.channel4Trigger;
+        gbContext.channel4LengthEnable = this.channel4LengthEnable;
+        gbContext.outputVinRight = this.outputVinRight;
+        gbContext.rightVolume = this.rightVolume;
+        gbContext.outputVinLeft = this.outputVinLeft;
+        gbContext.leftVolume = this.leftVolume;
+        gbContext.channel1LeftEnable = this.channel1LeftEnable;
+        gbContext.channel2LeftEnable = this.channel2LeftEnable;
+        gbContext.channel3LeftEnable = this.channel3LeftEnable;
+        gbContext.channel4LeftEnable = this.channel4LeftEnable;
+        gbContext.channel1RightEnable = this.channel1RightEnable;
+        gbContext.channel2RightEnable = this.channel2RightEnable;
+        gbContext.channel3RightEnable = this.channel3RightEnable;
+        gbContext.channel4RightEnable = this.channel4RightEnable;
+
+
+        gbContext.channel1SweepFrequency = this.channel1SweepFrequency;
+        gbContext.channel1Index = this.channel1Index;
+        gbContext.channel1EnvelopeCounter = this.channel1EnvelopeCounter;
+        gbContext.channel4LFSR = this.channel4LFSR;
+        gbContext.channel1LengthCounter = this.channel1LengthCounter;
+        gbContext.channel2LengthCounter = this.channel2LengthCounter;
+        gbContext.channel3LengthCounter = this.channel3LengthCounter;
+        gbContext.channel4LengthCounter = this.channel4LengthCounter;
+        gbContext.channel1SweepCounter = this.channel1SweepCounter;
+        gbContext.soundEnable = this.soundEnable;
+        gbContext.channel3WaveTable = structuredClone(this.channel3WaveTable);
+        gbContext.soundCycles = this.cycles;
+
+
+        /*
+        gbContext.limiter = this.limiter;
+        gbContext.filled = this.filled;
+        gbContext.bufferLeft = this.bufferLeft;
+        gbContext.bufferRight = this.bufferRight;
+        gbContext.slaveBuffer = this.slaveBuffer;
+        gbContext.bufferLen = this.bufferLen;
+        gbContext.genCount = this.genCount;
+        gbContext.cnt = this.cnt;
+        gbContext.soundIdx = this.soundIdx;
+        */
+    }
+
+    setSnapShot(gbContext) {
+        this.frame = gbContext.frame;
+        this.channel1Enable = gbContext.channel1Enable;
+        this.channel2Enable = gbContext.channel2Enable;
+        this.channel3Enable = gbContext.channel3Enable;
+        this.channel4Enable = gbContext.channel4Enable;
+        this.channel1SweepDuration = gbContext.channel1SweepDuration;
+        this.channel1SweepDown = gbContext.channel1SweepDown;
+        this.channel1SweepShift = gbContext.channel1SweepShift;
+        this.channel1SweepEnable = gbContext.channel1SweepEnable;
+        this.channel1Duty = gbContext.channel1Duty;
+        this.channel1InitialVolume = gbContext.channel1InitialVolume;
+        this.channel1VolumeUp = gbContext.channel1VolumeUp;
+        this.channel1EnvelopeDuration = gbContext.channel1EnvelopeDuration;
+        this.channel1Frequency = gbContext.channel1Frequency;
+        this.channel1Trigger = gbContext.channel1Trigger;
+        this.channel1LengthEnable = gbContext.channel1LengthEnable;
+        this.channel2Duty = gbContext.channel2Duty;
+        this.channel2InitialVolume = gbContext.channel2InitialVolume;
+        this.channel2VolumeUp = gbContext.channel2VolumeUp;
+        this.channel2EnvelopeDuration = gbContext.channel2EnvelopeDuration;
+        this.channel2Frequency = gbContext.channel2Frequency;
+        this.channel2Trigger = gbContext.channel2Trigger;
+        this.channel2LengthEnable = gbContext.channel2LengthEnable;
+        this.channel3Play = gbContext.channel3Play;
+        this.channel3Volume = gbContext.channel3Volume;
+        this.channel3Frequency = gbContext.channel3Frequency;
+        this.channel3Trigger = gbContext.channel3Trigger;
+        this.channel3LengthEnable = gbContext.channel3LengthEnable;
+        this.channel4InitialVolume = gbContext.channel4InitialVolume;
+        this.channel4VolumeUp = gbContext.channel4VolumeUp;
+        this.channel4EnvelopeDuration = gbContext.channel4EnvelopeDuration;
+        this.channel4ShiftClockFrequency = gbContext.channel4ShiftClockFrequency;
+        this.channel4CounterStep = gbContext.channel4CounterStep;
+        this.channel4DivisionRatio = gbContext.channel4DivisionRatio;
+        this.channel4Trigger = gbContext.channel4Trigger;
+        this.channel4LengthEnable = gbContext.channel4LengthEnable;
+        this.outputVinRight = gbContext.outputVinRight;
+        this.rightVolume = gbContext.rightVolume;
+        this.outputVinLeft = gbContext.outputVinLeft;
+        this.leftVolume = gbContext.leftVolume;
+        this.channel1LeftEnable = gbContext.channel1LeftEnable;
+        this.channel2LeftEnable = gbContext.channel2LeftEnable;
+        this.channel3LeftEnable = gbContext.channel3LeftEnable;
+        this.channel4LeftEnable = gbContext.channel4LeftEnable;
+        this.channel1RightEnable = gbContext.channel1RightEnable;
+        this.channel2RightEnable = gbContext.channel2RightEnable;
+        this.channel3RightEnable = gbContext.channel3RightEnable;
+        this.channel4RightEnable = gbContext.channel4RightEnable;
+    
+        this.channel1SweepFrequency = gbContext.channel1SweepFrequency;
+        this.channel1Index = gbContext.channel1Index;
+        this.channel1EnvelopeCounter = gbContext.channel1EnvelopeCounter;
+        this.channel4LFSR = gbContext.channel4LFSR;
+        this.channel1LengthCounter = gbContext.channel1LengthCounter;
+        this.channel2LengthCounter = gbContext.channel2LengthCounter;
+        this.channel3LengthCounter = gbContext.channel3LengthCounter;
+        this.channel4LengthCounter = gbContext.channel4LengthCounter;
+        this.channel1SweepCounter = gbContext.channel1SweepCounter;
+        this.soundEnable = gbContext.soundEnable;
+        this.channel3WaveTable = structuredClone(gbContext.channel3WaveTable);
+        this.cycles = gbContext.soundCycles;
     }
 
     get nr10() {
@@ -4343,6 +4913,24 @@ class Timer {
         this.clockSelect = 0;
 
         this.overflow = false;
+    }
+
+    getSnapShot(gbContext) {
+        gbContext._div = this._div;
+        gbContext._tima = this._tima;
+        gbContext._tma = this._tma;
+        gbContext.timerEnable = this.timerEnable;
+        gbContext.clockSelect = this.clockSelect;
+        gbContext.overflow = this.overflow;
+    }
+
+    setSnapShot(gbContext) {
+        this._div = gbContext._div;
+        this._tima = gbContext._tima;
+        this._tma = gbContext._tma;
+        this.timerEnable = gbContext.timerEnable;
+        this.clockSelect = gbContext.clockSelect;
+        this.overflow = gbContext.overflow;
     }
 
     get div() {
