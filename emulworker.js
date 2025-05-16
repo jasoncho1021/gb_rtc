@@ -177,8 +177,8 @@ function rollback(payload) {
   if(frameDiff > MIN_ROLL_BACK_GAP) {
 
     if(frameDiff >= SNAP_SHOT_SIZE) { // 모듈러 한 바뀌 돌아서 cache값 덮어씌여짐. 복구 못 함.
-      console.log(`%cnot rollback. The frameDiff ${frameDiff} is greater than the cache size ${SNAP_SHOT_SIZE}`, 'background:red;color:white');
-      saveEmulLog(`not rollback. The frameDiff ${frameDiff} is greater than the cache size ${SNAP_SHOT_SIZE}`);
+      console.log(`%cnot rollback. The frameDiff ${frameDiff} is greater than the cache size ${SNAP_SHOT_SIZE} recv: ${frameIdx}, current: ${snapShotIdx}`, 'background:red;color:white');
+      saveEmulLog(`not rollback. The frameDiff ${frameDiff} is greater than the cache size ${SNAP_SHOT_SIZE} recv: ${frameIdx}, current: ${snapShotIdx}`);
     } else if (frameDiff != 0) {
       /*
       rollback

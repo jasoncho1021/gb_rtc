@@ -27046,6 +27046,7 @@ function pingChecker() {
     }
     pingSendCount++;
     const pingSend = Date.now();
+    console.log(`send at ${formatDate(pingSend)}`);
     pingSendQueue.enqueue(pingSend);
     _rtc_js__WEBPACK_IMPORTED_MODULE_0__.messenger.send("P 0 " + pingSend);
   }, 1000);
@@ -27337,6 +27338,20 @@ function slaveHandler(combinedBuffer) {
   }
 }
 
+function formatDate(date) {
+  const options = {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false // Set to true for 12-hour format
+  };
+  return new Intl.DateTimeFormat('en-US', options).format(date);
+}
+
+
 let pingRecvCount = 0;
 function putBlob(e) {
   const combinedBuffer = e.data; // The received ArrayBuffer
@@ -27351,6 +27366,7 @@ function putBlob(e) {
     const pingRole = recvPing[1];
     const recvPingVal = Number(recvPing[2]);
     const currentDate = Date.now();
+    console.log(formatDate(currentDate));
     const pingValue = currentDate - recvPingVal;
 
     if(pingRole == '0') {
@@ -27383,8 +27399,8 @@ function putBlob(e) {
     //console.log(`${flag} enqueue`);
 
     //delaySimulator(combinedBuffer);
-    recvDataHandler(combinedBuffer);
-
+    //recvDataHandler(combinedBuffer);
+    slaveHandler(combinedBuffer);
   } else if (flag == 2) {
    
     /*
@@ -27398,7 +27414,8 @@ function putBlob(e) {
     //console.log(`${flag} enqueue, idx: ${dataView.getUint8(1, true)}`);
 
     //delaySimulator(combinedBuffer);
-    recvDataHandler(combinedBuffer);
+    //recvDataHandler(combinedBuffer);
+    slaveHandler(combinedBuffer);
    
   } else if (flag == 3) {
       let keyAction;
