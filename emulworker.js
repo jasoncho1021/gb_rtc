@@ -534,7 +534,7 @@ function hasSavedFile() {
 let wasm = null;
 
 async function loadWasm() {   
-  const response = await fetch('/gb.wasm');
+  const response = await fetch('gb.wasm');
   const bytes = await response.arrayBuffer();
   const result = await (0,_gb_js__WEBPACK_IMPORTED_MODULE_2__.instantiate)(bytes, { 
     env: {
